@@ -102,16 +102,12 @@ export default function AttendancePage() {
                   </div>
                   <div className="text-right">
                     <span className="font-bold">{totals[w.id]?.days ?? 0}日</span>
-                    <span className="text-gray-500 ml-2">{(totals[w.id]?.amount ?? 0).toLocaleString()}円</span>
                   </div>
                 </div>
               ))}
               <div className="flex justify-between items-center text-sm pt-2 font-bold">
                 <span>合計</span>
-                <div className="text-right">
-                  <span>{entries.length}日</span>
-                  <span className="ml-2">{entries.reduce((s, e) => s + Number(e.amount), 0).toLocaleString()}円</span>
-                </div>
+                <span>{entries.length}日</span>
               </div>
             </div>
           </div>
