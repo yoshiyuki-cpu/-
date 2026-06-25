@@ -100,9 +100,7 @@ export default function AttendancePage() {
                     <span className="font-medium">{w.name}</span>
                     {w.company_name && <span className="text-gray-500 ml-1">（{w.company_name}）</span>}
                   </div>
-                  <div className="text-right">
-                    <span className="font-bold">{totals[w.id]?.days ?? 0}日</span>
-                  </div>
+                  <span className="font-bold">{totals[w.id]?.days ?? 0}日</span>
                 </div>
               ))}
               <div className="flex justify-between items-center text-sm pt-2 font-bold">
