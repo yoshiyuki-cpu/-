@@ -4,6 +4,9 @@ import { supabase, DisposalSite, WasteType } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
 
 type Tab = 'waste' | 'labor' | 'fuel' | 'lease'
+type Worker = { id: number; name: string; company_name: string | null }
+
+const LABOR_UNIT_PRICE = 15000
 
 export default function EntryPage() {
   const { id } = useParams()
@@ -11,22 +14,33 @@ export default function EntryPage() {
   const [tab, setTab] = useState<Tab>('waste')
   const [sites, setSites] = useState<DisposalSite[]>([])
   const [wasteTypes, setWasteTypes] = useState<WasteType[]>([])
+  const [workers, setWorkers] = useState<Worker[]>([])
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
 
   const today = new Date().toISOString().split('T')[0]
   const [wasteForm, setWasteForm] = useState({ date: today, site_id: '', waste_type_id: '', quantity: '' })
-  const [otherForm, setOtherForm] = useState({ date: today, quantity: '1', unit_price: '', note: '' })
+  const [laborDate, setLaborDate] = useState(today)
+  const [selectedWorkers, setSelectedWorkers] = useState<number[]>([])
+  const [otherForm, setOtherForm] = useState({ date: today, unit_price: '', note: '' })
 
   useEffect(() => { loadMaster() }, [])
 
   async function loadMaster() {
-    const [{ data: s }, { data: w }] = await Promise.all([
+    const [{ data: s }, { data: w }, { data: wk }] = await Promise.all([
       supabase.from('disposal_sites').select('*').order('name'),
       supabase.from('waste_types').select('*, disposal_sites(name)').order('name'),
+      supabase.from('workers').select('*').order('name'),
     ])
     setSites(s ?? [])
     setWasteTypes((w as any) ?? [])
+    setWorkers(wk ?? [])
+  }
+
+  function toggleWorker(workerId: number) {
+    setSelectedWorkers(prev =>
+      prev.includes(workerId) ? prev.filter(id => id !== workerId) : [...prev, workerId]
+    )
   }
 
   const filteredTypes = wasteTypes.filter(w => String(w.disposal_site_id) === wasteForm.site_id)
@@ -52,25 +66,41 @@ export default function EntryPage() {
     setTimeout(() => setSuccess(false), 2000)
   }
 
+  async function saveLabor(e: React.FormEvent) {
+    e.preventDefault()
+    if (selectedWorkers.length === 0) return
+    setSaving(true)
+    await Promise.all(selectedWorkers.map(workerId =>
+      supabase.from('labor_entries').insert({
+        project_id: Number(id),
+        worker_id: workerId,
+        date: laborDate,
+        amount: LABOR_UNIT_PRICE,
+      })
+    ))
+    setSaving(false)
+    setSuccess(true)
+    setSelectedWorkers([])
+    setTimeout(() => setSuccess(false), 2000)
+  }
+
   async function saveOther(e: React.FormEvent) {
     e.preventDefault()
-    const amount = tab === 'labor'
-      ? Math.round(Number(otherForm.quantity) * Number(otherForm.unit_price))
-      : Number(otherForm.unit_price)
+    const amount = Number(otherForm.unit_price)
     if (!amount) return
     setSaving(true)
     await supabase.from('other_entries').insert({
       project_id: Number(id),
       entry_type: tab,
       date: otherForm.date,
-      quantity: Number(otherForm.quantity),
-      unit_price: Number(otherForm.unit_price),
+      quantity: 1,
+      unit_price: amount,
       amount,
       note: otherForm.note || null,
     })
     setSaving(false)
     setSuccess(true)
-    setOtherForm({ date: otherForm.date, quantity: '1', unit_price: '', note: '' })
+    setOtherForm({ date: otherForm.date, unit_price: '', note: '' })
     setTimeout(() => setSuccess(false), 2000)
   }
 
@@ -138,40 +168,55 @@ export default function EntryPage() {
         </form>
       )}
 
-      {(tab === 'labor' || tab === 'fuel' || tab === 'lease') && (
+      {tab === 'labor' && (
+        <form onSubmit={saveLabor} className="bg-white rounded-lg shadow p-4 flex flex-col gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">日付</label>
+            <input type="date" className="w-full border rounded px-3 py-2" value={laborDate}
+              onChange={e => setLaborDate(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2">作業員を選択（複数可）</label>
+            {workers.length === 0 && (
+              <p className="text-sm text-gray-400">マスタページで作業員を登録してください</p>
+            )}
+            <div className="flex flex-col gap-2">
+              {workers.map(w => (
+                <label key={w.id} className={`flex items-center gap-3 p-3 rounded border cursor-pointer ${selectedWorkers.includes(w.id) ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
+                  <input type="checkbox" checked={selectedWorkers.includes(w.id)}
+                    onChange={() => toggleWorker(w.id)} className="w-4 h-4" />
+                  <span className="text-sm">
+                    {w.name}
+                    {w.company_name && <span className="text-gray-500 ml-1">（{w.company_name}）</span>}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+          {selectedWorkers.length > 0 && (
+            <p className="text-sm text-gray-600">
+              {selectedWorkers.length}名 × 15,000円 = <span className="font-bold text-gray-900">{(selectedWorkers.length * LABOR_UNIT_PRICE).toLocaleString()}円</span>（税別）
+            </p>
+          )}
+          <button type="submit" disabled={saving || selectedWorkers.length === 0}
+            className="bg-blue-600 text-white py-2 rounded font-medium disabled:opacity-50">
+            {saving ? '保存中...' : '保存する'}
+          </button>
+        </form>
+      )}
+
+      {(tab === 'fuel' || tab === 'lease') && (
         <form onSubmit={saveOther} className="bg-white rounded-lg shadow p-4 flex flex-col gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">日付</label>
             <input type="date" className="w-full border rounded px-3 py-2" value={otherForm.date}
               onChange={e => setOtherForm({ ...otherForm, date: e.target.value })} />
           </div>
-          {tab === 'labor' ? (
-            <>
-              <div>
-                <label className="block text-sm font-medium mb-1">人工数</label>
-                <input type="number" step="0.5" className="w-full border rounded px-3 py-2" value={otherForm.quantity}
-                  onChange={e => setOtherForm({ ...otherForm, quantity: e.target.value })} placeholder="1" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">単価（円/人）</label>
-                <input type="number" className="w-full border rounded px-3 py-2" value={otherForm.unit_price}
-                  onChange={e => setOtherForm({ ...otherForm, unit_price: e.target.value })} placeholder="20000" />
-              </div>
-              {otherForm.quantity && otherForm.unit_price && (
-                <p className="text-sm text-gray-500">
-                  金額: <span className="font-medium text-gray-800">{Math.round(Number(otherForm.quantity) * Number(otherForm.unit_price)).toLocaleString()}円</span>
-                </p>
-              )}
-            </>
-          ) : (
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                金額（円）
-              </label>
-              <input type="number" className="w-full border rounded px-3 py-2" value={otherForm.unit_price}
-                onChange={e => setOtherForm({ ...otherForm, unit_price: e.target.value })} placeholder="0" />
-            </div>
-          )}
+          <div>
+            <label className="block text-sm font-medium mb-1">金額（円）</label>
+            <input type="number" className="w-full border rounded px-3 py-2" value={otherForm.unit_price}
+              onChange={e => setOtherForm({ ...otherForm, unit_price: e.target.value })} placeholder="0" />
+          </div>
           <div>
             <label className="block text-sm font-medium mb-1">メモ（任意）</label>
             <input className="w-full border rounded px-3 py-2" value={otherForm.note}
