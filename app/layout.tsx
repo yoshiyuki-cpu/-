@@ -18,6 +18,7 @@ export default function RootLayout({
           <a href="/" className="text-lg font-bold">工事台帳</a>
           <nav className="flex gap-4 ml-auto text-sm">
             <a href="/" className="hover:underline">現場一覧</a>
+            <a href="/attendance" className="hover:underline">出面</a>
             <a href="/master" className="hover:underline">マスタ</a>
           </nav>
         </header>
