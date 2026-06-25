@@ -59,6 +59,16 @@ export default function ProjectDetailPage() {
         <div>
           <h1 className="text-xl font-bold">{project.name}</h1>
           <p className="text-sm text-gray-500">{project.start_date} 〜 {project.end_date ?? '進行中'}</p>
+          {project.location && (
+            <a
+              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(project.location)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline mt-1"
+            >
+              📍 {project.location}
+            </a>
+          )}
         </div>
         <Link href={`/projects/${id}/entry`} className="bg-blue-600 text-white px-4 py-2 rounded text-sm">
           + 入力
