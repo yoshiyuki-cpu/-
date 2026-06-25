@@ -6,7 +6,8 @@ import { useParams, useRouter } from 'next/navigation'
 type Tab = 'waste' | 'labor' | 'fuel' | 'lease'
 type Worker = { id: number; name: string; company_name: string | null }
 
-const LABOR_UNIT_PRICE = 15000
+const LABOR_UNIT_PRICE_TAX_EXCL = 15000
+const LABOR_UNIT_PRICE = Math.round(LABOR_UNIT_PRICE_TAX_EXCL * 1.1)
 
 export default function EntryPage() {
   const { id } = useParams()
@@ -195,7 +196,7 @@ export default function EntryPage() {
           </div>
           {selectedWorkers.length > 0 && (
             <p className="text-sm text-gray-600">
-              {selectedWorkers.length}名 × 15,000円 = <span className="font-bold text-gray-900">{(selectedWorkers.length * LABOR_UNIT_PRICE).toLocaleString()}円</span>（税別）
+              {selectedWorkers.length}名 × 16,500円 = <span className="font-bold text-gray-900">{(selectedWorkers.length * LABOR_UNIT_PRICE).toLocaleString()}円</span>（税込）
             </p>
           )}
           <button type="submit" disabled={saving || selectedWorkers.length === 0}
