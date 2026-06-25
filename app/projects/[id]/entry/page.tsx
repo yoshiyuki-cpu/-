@@ -213,6 +213,41 @@ export default function EntryPage() {
             <input type="date" className="w-full border rounded px-3 py-2" value={otherForm.date}
               onChange={e => setOtherForm({ ...otherForm, date: e.target.value })} />
           </div>
+          {tab === 'fuel' && (
+            <div>
+              <label className="block text-sm font-medium mb-1">レシート写真から読み取る（任意）</label>
+              <label className="flex items-center justify-center w-full border-2 border-dashed border-gray-300 rounded-lg py-4 cursor-pointer hover:border-blue-400 bg-gray-50">
+                <div className="text-center">
+                  <span className="text-2xl">📷</span>
+                  <p className="text-sm text-gray-500 mt-1">タップして写真を選択</p>
+                </div>
+                <input type="file" accept="image/*" capture="environment" className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0]
+                    if (!file) return
+                    setSaving(true)
+                    const reader = new FileReader()
+                    reader.onload = async (ev) => {
+                      const dataUrl = ev.target?.result as string
+                      const base64 = dataUrl.split(',')[1]
+                      const mediaType = file.type
+                      const res = await fetch('/api/analyze-receipt', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ imageBase64: base64, mediaType }),
+                      })
+                      const data = await res.json()
+                      if (data.amount) {
+                        setOtherForm(f => ({ ...f, unit_price: String(data.amount) }))
+                      }
+                      setSaving(false)
+                    }
+                    reader.readAsDataURL(file)
+                  }} />
+              </label>
+              {saving && <p className="text-sm text-blue-500">読み取り中...</p>}
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium mb-1">金額（円）</label>
             <input type="number" className="w-full border rounded px-3 py-2" value={otherForm.unit_price}
@@ -225,7 +260,7 @@ export default function EntryPage() {
           </div>
           <button type="submit" disabled={saving || !otherForm.unit_price}
             className="bg-blue-600 text-white py-2 rounded font-medium disabled:opacity-50">
-            {saving ? '保存中...' : '保存する'}
+            {saving ? '処理中...' : '保存する'}
           </button>
         </form>
       )}
