@@ -27,6 +27,7 @@ export type Project = {
   start_date: string
   end_date: string | null
   status: 'active' | 'completed'
+  notes: string | null
   created_at: string
 }
 

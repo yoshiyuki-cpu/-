@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 
 export default function NewProjectPage() {
   const router = useRouter()
-  const [form, setForm] = useState({ name: '', location: '', start_date: '', end_date: '' })
+  const [form, setForm] = useState({ name: '', location: '', start_date: '', end_date: '', notes: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -18,6 +18,7 @@ export default function NewProjectPage() {
       location: form.location,
       start_date: form.start_date,
       end_date: form.end_date || null,
+      notes: form.notes || null,
       status: 'active',
     }).select().single()
     if (err) { setError(err.message); setSaving(false); return }
@@ -31,31 +32,41 @@ export default function NewProjectPage() {
         {error && <p className="text-red-500 text-sm">{error}</p>}
         <div>
           <label className="block text-sm font-medium mb-1">現場名 *</label>
-          <input className="w-full border rounded px-3 py-2" value={form.name}
+          <input className="w-full border rounded px-3 py-3 text-base" value={form.name}
             onChange={e => setForm({ ...form, name: e.target.value })} placeholder="例：丸の内解体現場" />
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">場所</label>
-          <input className="w-full border rounded px-3 py-2" value={form.location}
+          <input className="w-full border rounded px-3 py-3 text-base" value={form.location}
             onChange={e => setForm({ ...form, location: e.target.value })} placeholder="例：岡山市北区丸の内" />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-sm font-medium mb-1">開始日 *</label>
-            <input type="date" className="w-full border rounded px-3 py-2" value={form.start_date}
+            <input type="date" className="w-full border rounded px-3 py-3" value={form.start_date}
               onChange={e => setForm({ ...form, start_date: e.target.value })} />
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">終了日</label>
-            <input type="date" className="w-full border rounded px-3 py-2" value={form.end_date}
+            <input type="date" className="w-full border rounded px-3 py-3" value={form.end_date}
               onChange={e => setForm({ ...form, end_date: e.target.value })} />
           </div>
         </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">備考・メモ</label>
+          <textarea
+            className="w-full border rounded px-3 py-3 text-sm resize-none"
+            rows={3}
+            value={form.notes}
+            onChange={e => setForm({ ...form, notes: e.target.value })}
+            placeholder="特記事項、担当者名など"
+          />
+        </div>
         <button type="submit" disabled={saving}
-          className="bg-blue-600 text-white py-2 rounded font-medium disabled:opacity-50">
+          className="bg-blue-600 text-white py-3 rounded font-medium disabled:opacity-50 text-base">
           {saving ? '登録中...' : '登録する'}
         </button>
-        <button type="button" onClick={() => router.back()} className="text-gray-500 text-sm text-center">
+        <button type="button" onClick={() => router.back()} className="text-gray-500 text-sm text-center py-2">
           キャンセル
         </button>
       </form>
