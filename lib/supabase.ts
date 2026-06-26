@@ -29,6 +29,12 @@ export type Project = {
   status: 'active' | 'completed'
   notes: string | null
   aerial_photo_url: string | null
+  budget_waste_cost: number | null
+  budget_labor: number | null
+  budget_fuel: number | null
+  budget_lease: number | null
+  budget_scrap_revenue: number | null
+  process_notes: string | null
   created_at: string
 }
 
@@ -51,6 +57,23 @@ export type OtherEntry = {
   unit_price: number
   amount: number
   note: string | null
+}
+
+export type WorkProcess = {
+  id: number
+  project_id: number
+  name: string
+  start_date: string
+  end_date: string
+  notes: string | null
+  created_at: string
+}
+
+export type LaborTarget = {
+  id: number
+  project_id: number
+  date: string
+  target_count: number
 }
 
 export type MeetingNote = {
