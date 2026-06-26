@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase, Project, WasteEntry, OtherEntry } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -36,6 +36,9 @@ export default function ProjectDetailPage() {
   const [showChart, setShowChart] = useState(true)
   const [editNotes, setEditNotes] = useState(false)
   const [notesValue, setNotesValue] = useState('')
+  const [uploadingAerial, setUploadingAerial] = useState(false)
+  const [showAerial, setShowAerial] = useState(false)
+  const aerialInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { load() }, [id])
 
@@ -67,6 +70,20 @@ export default function ProjectDetailPage() {
     await supabase.from('projects').update({ notes: notesValue || null }).eq('id', id)
     setEditNotes(false)
     load()
+  }
+
+  async function handleAerialUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingAerial(true)
+    const ext = file.name.split('.').pop()
+    const path = `aerial/${id}/aerial.${ext}`
+    await supabase.storage.from('project-files').upload(path, file, { upsert: true })
+    const { data: urlData } = supabase.storage.from('project-files').getPublicUrl(path)
+    await supabase.from('projects').update({ aerial_photo_url: urlData.publicUrl }).eq('id', id)
+    setUploadingAerial(false)
+    load()
+    if (aerialInputRef.current) aerialInputRef.current.value = ''
   }
 
   async function toggleStatus() {
@@ -195,6 +212,51 @@ export default function ProjectDetailPage() {
           className="text-xs px-3 py-1.5 rounded-full border text-blue-600 bg-white ml-auto">
           CSV出力
         </button>
+      </div>
+
+      {/* 議事録・KY活動ナビゲーション */}
+      <div className="grid grid-cols-2 gap-3 mb-4">
+        <Link href={`/projects/${id}/minutes`}
+          className="bg-white rounded-lg shadow p-4 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
+          <span className="text-2xl">📋</span>
+          <span className="font-medium text-sm text-gray-700">議事録</span>
+          <span className="text-xs text-gray-400">危険箇所・注意事項</span>
+        </Link>
+        <Link href={`/projects/${id}/ky`}
+          className="bg-white rounded-lg shadow p-4 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
+          <span className="text-2xl">🛡️</span>
+          <span className="font-medium text-sm text-gray-700">KY活動</span>
+          <span className="text-xs text-gray-400">写真記録</span>
+        </Link>
+      </div>
+
+      {/* 上空図面 */}
+      <div className="bg-white rounded-lg shadow p-4 mb-4">
+        <div className="flex justify-between items-center mb-2">
+          <h2 className="font-bold text-gray-700 text-sm">上空図面</h2>
+          <div className="flex gap-2">
+            {project.aerial_photo_url && (
+              <button onClick={() => setShowAerial(v => !v)} className="text-xs text-blue-600">
+                {showAerial ? '閉じる' : '表示'}
+              </button>
+            )}
+            <label className={`text-xs px-2 py-1 rounded border cursor-pointer ${uploadingAerial ? 'text-gray-400' : 'text-blue-600'}`}>
+              {uploadingAerial ? 'アップロード中...' : project.aerial_photo_url ? '差し替え' : 'アップロード'}
+              <input ref={aerialInputRef} type="file" accept="image/*" className="hidden"
+                disabled={uploadingAerial} onChange={handleAerialUpload} />
+            </label>
+          </div>
+        </div>
+        {!project.aerial_photo_url && (
+          <p className="text-sm text-gray-400">図面がありません</p>
+        )}
+        {project.aerial_photo_url && showAerial && (
+          <img src={project.aerial_photo_url} alt="上空図面"
+            className="w-full rounded border mt-1" />
+        )}
+        {project.aerial_photo_url && !showAerial && (
+          <p className="text-sm text-gray-500">図面あり（「表示」で確認）</p>
+        )}
       </div>
 
       {/* 備考欄 */}

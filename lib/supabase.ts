@@ -28,6 +28,7 @@ export type Project = {
   end_date: string | null
   status: 'active' | 'completed'
   notes: string | null
+  aerial_photo_url: string | null
   created_at: string
 }
 
@@ -50,4 +51,22 @@ export type OtherEntry = {
   unit_price: number
   amount: number
   note: string | null
+}
+
+export type MeetingNote = {
+  id: number
+  project_id: number
+  date: string
+  danger_points: string | null
+  cautions: string | null
+  notices: string | null
+  created_at: string
+}
+
+export type KyPhoto = {
+  id: number
+  project_id: number
+  date: string
+  photo_url: string
+  created_at: string
 }
