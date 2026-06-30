@@ -59,6 +59,18 @@ export type OtherEntry = {
   note: string | null
 }
 
+export type ScrapRecord = {
+  id: number
+  project_id: number
+  date: string
+  items: string | null
+  amount: number
+  note: string | null
+  site_photo_url: string | null
+  slip_photo_url: string | null
+  created_at: string
+}
+
 export type WorkProcess = {
   id: number
   project_id: number

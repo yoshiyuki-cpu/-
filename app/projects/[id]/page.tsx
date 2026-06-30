@@ -215,12 +215,18 @@ export default function ProjectDetailPage() {
       </div>
 
       {/* ナビゲーション */}
-      <div className="grid grid-cols-3 gap-2 mb-4">
+      <div className="grid grid-cols-2 gap-2 mb-4">
         <Link href={`/projects/${id}/plan`}
           className="bg-white rounded-lg shadow p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
           <span className="text-2xl">📊</span>
           <span className="font-medium text-xs text-gray-700">予算・工程</span>
           <span className="text-xs text-gray-400">計画管理</span>
+        </Link>
+        <Link href={`/projects/${id}/scrap`}
+          className="bg-white rounded-lg shadow p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
+          <span className="text-2xl">♻️</span>
+          <span className="font-medium text-xs text-gray-700">スクラップ</span>
+          <span className="text-xs text-gray-400">写真・伝票記録</span>
         </Link>
         <Link href={`/projects/${id}/minutes`}
           className="bg-white rounded-lg shadow p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
