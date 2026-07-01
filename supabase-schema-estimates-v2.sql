@@ -3,6 +3,7 @@
 
 drop table if exists estimate_waste_items;
 drop table if exists estimate_extra_items;
+drop table if exists estimate_items;
 drop table if exists estimates cascade;
 
 create table estimates (
