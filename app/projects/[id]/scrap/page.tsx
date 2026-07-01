@@ -226,7 +226,7 @@ export default function ScrapPage() {
                     <p className="text-sm text-gray-500">現物を撮影</p>
                   </>
                 )}
-                <input ref={sitePhotoRef} type="file" accept="image/*" capture="environment"
+                <input ref={sitePhotoRef} type="file" accept="image/*"
                   className="hidden" disabled={uploadingSite} onChange={handleSitePhoto} />
               </label>
             )}
@@ -262,7 +262,7 @@ export default function ScrapPage() {
                     <p className="text-sm font-medium text-blue-700">伝票を撮影してAI読み取り</p>
                   </>
                 )}
-                <input ref={slipPhotoRef} type="file" accept="image/*" capture="environment"
+                <input ref={slipPhotoRef} type="file" accept="image/*"
                   className="hidden" disabled={uploadingSlip || analyzingSlip} onChange={handleSlipPhoto} />
               </label>
             )}
