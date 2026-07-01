@@ -222,7 +222,7 @@ export default function EntryPage() {
                   <span className="text-2xl">📷</span>
                   <p className="text-sm text-gray-500 mt-1">タップして写真を選択</p>
                 </div>
-                <input type="file" accept="image/*" capture="environment" className="hidden"
+                <input type="file" accept="image/*" className="hidden"
                   onChange={async (e) => {
                     const file = e.target.files?.[0]
                     if (!file) return
