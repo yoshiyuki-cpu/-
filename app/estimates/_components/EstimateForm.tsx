@@ -1,11 +1,10 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase, DisposalSite, WasteType, Estimate, EstimateWasteItem, EstimateExtraItem, EstimateStatus } from '@/lib/supabase'
-import { calcEstimateTotals, STRUCTURE_OPTIONS, INCIDENTAL_PRESETS } from '@/lib/estimateCalc'
+import { supabase, Estimate, EstimateItem, EstimateCategory, EstimateStatus } from '@/lib/supabase'
+import { calcEstimateTotals, CATEGORIES, UNIT_OPTIONS, itemAmount } from '@/lib/estimateCalc'
 
-type WasteRow = { key: string; waste_type_id: number | null; name: string; unit: string; quantity: string; unit_price: string }
-type ExtraRow = { key: string; name: string; amount: string }
+type ItemRow = { key: string; category: EstimateCategory; name: string; quantity: string; unit: string; unit_price: string; note: string }
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ja-JP') + '円'
 
@@ -14,12 +13,12 @@ function emptyForm() {
     customer_name: '',
     customer_address: '',
     customer_contact: '',
+    project_name: '',
     site_address: '',
-    building_structure: STRUCTURE_OPTIONS[0],
-    floor_area: '',
-    unit_price: '',
-    expense_rate: '0',
-    discount_amount: '0',
+    completion_date: '',
+    payment_due_date: '',
+    payment_terms: '現金100%',
+    assignee: '',
     tax_rate: '10',
     status: 'draft' as EstimateStatus,
     issue_date: new Date().toISOString().slice(0, 10),
@@ -35,26 +34,16 @@ export default function EstimateForm({
 }: {
   mode: 'new' | 'edit'
   estimateId?: number
-  initial?: { estimate: Estimate; wasteItems: EstimateWasteItem[]; extraItems: EstimateExtraItem[] }
+  initial?: { estimate: Estimate; items: EstimateItem[] }
 }) {
   const router = useRouter()
   const keyCounter = useRef(0)
   const nextKey = () => `k${keyCounter.current++}`
 
   const [form, setForm] = useState(emptyForm())
-  const [wasteRows, setWasteRows] = useState<WasteRow[]>([])
-  const [extraRows, setExtraRows] = useState<ExtraRow[]>([])
-  const [sites, setSites] = useState<DisposalSite[]>([])
-  const [wasteTypes, setWasteTypes] = useState<WasteType[]>([])
-  const [pickerSiteId, setPickerSiteId] = useState('')
-  const [pickerWasteTypeId, setPickerWasteTypeId] = useState('')
+  const [rows, setRows] = useState<ItemRow[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-
-  useEffect(() => {
-    supabase.from('disposal_sites').select('*').order('name').then(({ data }) => setSites(data ?? []))
-    supabase.from('waste_types').select('*').order('name').then(({ data }) => setWasteTypes((data as any) ?? []))
-  }, [])
 
   useEffect(() => {
     if (!initial) return
@@ -63,68 +52,40 @@ export default function EstimateForm({
       customer_name: e.customer_name,
       customer_address: e.customer_address ?? '',
       customer_contact: e.customer_contact ?? '',
+      project_name: e.project_name ?? '',
       site_address: e.site_address ?? '',
-      building_structure: e.building_structure ?? STRUCTURE_OPTIONS[0],
-      floor_area: e.floor_area != null ? String(e.floor_area) : '',
-      unit_price: e.unit_price != null ? String(e.unit_price) : '',
-      expense_rate: String(e.expense_rate),
-      discount_amount: String(e.discount_amount),
+      completion_date: e.completion_date ?? '',
+      payment_due_date: e.payment_due_date ?? '',
+      payment_terms: e.payment_terms ?? '',
+      assignee: e.assignee ?? '',
       tax_rate: String(e.tax_rate),
       status: e.status,
       issue_date: e.issue_date,
       valid_until: e.valid_until ?? '',
       notes: e.notes ?? '',
     })
-    setWasteRows(initial.wasteItems.map(w => ({
-      key: nextKey(), waste_type_id: w.waste_type_id, name: w.name, unit: w.unit,
-      quantity: String(w.quantity), unit_price: String(w.unit_price),
+    setRows(initial.items.map(i => ({
+      key: nextKey(), category: i.category, name: i.name, quantity: String(i.quantity),
+      unit: i.unit, unit_price: String(i.unit_price), note: i.note ?? '',
     })))
-    setExtraRows(initial.extraItems.map(x => ({ key: nextKey(), name: x.name, amount: String(x.amount) })))
   }, [initial])
 
-  const filteredWasteTypes = pickerSiteId ? wasteTypes.filter(w => String(w.disposal_site_id) === pickerSiteId) : wasteTypes
-
-  function addWasteRowFromMaster() {
-    const wt = wasteTypes.find(w => String(w.id) === pickerWasteTypeId)
-    if (!wt) return
-    setWasteRows(rows => [...rows, {
-      key: nextKey(), waste_type_id: wt.id, name: wt.name, unit: wt.unit,
-      quantity: '', unit_price: String(wt.unit_price),
-    }])
-    setPickerWasteTypeId('')
+  function addRow(category: EstimateCategory) {
+    setRows(rs => [...rs, { key: nextKey(), category, name: '', quantity: '1', unit: '式', unit_price: '', note: '' }])
   }
 
-  function addCustomWasteRow() {
-    setWasteRows(rows => [...rows, { key: nextKey(), waste_type_id: null, name: '', unit: 'kg', quantity: '', unit_price: '' }])
+  function updateRow(key: string, patch: Partial<ItemRow>) {
+    setRows(rs => rs.map(r => r.key === key ? { ...r, ...patch } : r))
   }
 
-  function updateWasteRow(key: string, patch: Partial<WasteRow>) {
-    setWasteRows(rows => rows.map(r => r.key === key ? { ...r, ...patch } : r))
+  function removeRow(key: string) {
+    setRows(rs => rs.filter(r => r.key !== key))
   }
-
-  function removeWasteRow(key: string) {
-    setWasteRows(rows => rows.filter(r => r.key !== key))
-  }
-
-  function addExtraRow(name: string) {
-    setExtraRows(rows => [...rows, { key: nextKey(), name, amount: '' }])
-  }
-
-  function updateExtraRow(key: string, patch: Partial<ExtraRow>) {
-    setExtraRows(rows => rows.map(r => r.key === key ? { ...r, ...patch } : r))
-  }
-
-  function removeExtraRow(key: string) {
-    setExtraRows(rows => rows.filter(r => r.key !== key))
-  }
-
-  const buildingAmount = (Number(form.floor_area) || 0) * (Number(form.unit_price) || 0)
 
   const totals = useMemo(() => calcEstimateTotals(
-    { building_amount: buildingAmount, expense_rate: Number(form.expense_rate) || 0, discount_amount: Number(form.discount_amount) || 0, tax_rate: Number(form.tax_rate) || 0 },
-    wasteRows.map(r => ({ quantity: Number(r.quantity) || 0, unit_price: Number(r.unit_price) || 0 })),
-    extraRows.map(r => ({ amount: Number(r.amount) || 0 })),
-  ), [buildingAmount, form.expense_rate, form.discount_amount, form.tax_rate, wasteRows, extraRows])
+    { tax_rate: Number(form.tax_rate) || 0 },
+    rows.map(r => ({ category: r.category, quantity: Number(r.quantity) || 0, unit_price: Number(r.unit_price) || 0 })),
+  ), [form.tax_rate, rows])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -136,13 +97,12 @@ export default function EstimateForm({
       customer_name: form.customer_name,
       customer_address: form.customer_address || null,
       customer_contact: form.customer_contact || null,
+      project_name: form.project_name || null,
       site_address: form.site_address || null,
-      building_structure: form.building_structure || null,
-      floor_area: form.floor_area ? Number(form.floor_area) : null,
-      unit_price: form.unit_price ? Number(form.unit_price) : null,
-      building_amount: buildingAmount,
-      expense_rate: Number(form.expense_rate) || 0,
-      discount_amount: Number(form.discount_amount) || 0,
+      completion_date: form.completion_date || null,
+      payment_due_date: form.payment_due_date || null,
+      payment_terms: form.payment_terms || null,
+      assignee: form.assignee || null,
       tax_rate: Number(form.tax_rate) || 0,
       status: form.status,
       issue_date: form.issue_date,
@@ -159,22 +119,16 @@ export default function EstimateForm({
     } else {
       const { error: err } = await supabase.from('estimates').update(payload).eq('id', id)
       if (err) { setError(err.message); setSaving(false); return }
-      await supabase.from('estimate_waste_items').delete().eq('estimate_id', id)
-      await supabase.from('estimate_extra_items').delete().eq('estimate_id', id)
+      await supabase.from('estimate_items').delete().eq('estimate_id', id)
     }
 
-    const wastePayload = wasteRows
+    const itemsPayload = rows
       .filter(r => r.name)
       .map((r, i) => ({
-        estimate_id: id, waste_type_id: r.waste_type_id, name: r.name, unit: r.unit,
-        quantity: Number(r.quantity) || 0, unit_price: Number(r.unit_price) || 0, sort_order: i,
+        estimate_id: id, category: r.category, name: r.name, quantity: Number(r.quantity) || 0,
+        unit: r.unit, unit_price: Number(r.unit_price) || 0, note: r.note || null, sort_order: i,
       }))
-    if (wastePayload.length) await supabase.from('estimate_waste_items').insert(wastePayload)
-
-    const extraPayload = extraRows
-      .filter(r => r.name)
-      .map((r, i) => ({ estimate_id: id, name: r.name, amount: Number(r.amount) || 0, sort_order: i }))
-    if (extraPayload.length) await supabase.from('estimate_extra_items').insert(extraPayload)
+    if (itemsPayload.length) await supabase.from('estimate_items').insert(itemsPayload)
 
     router.push(`/estimates/${id}`)
   }
@@ -186,11 +140,11 @@ export default function EstimateForm({
       {error && <p className="text-red-500 text-sm">{error}</p>}
 
       <section className="bg-white rounded-lg shadow p-4">
-        <h2 className="font-bold mb-3 text-gray-700">お客様情報</h2>
+        <h2 className="font-bold mb-3 text-gray-700">お客様・現場情報</h2>
         <div className="flex flex-col gap-3">
           <div>
             <label className="block text-sm font-medium mb-1">お客様名 *</label>
-            <input className={inputClass} value={form.customer_name} onChange={e => setForm({ ...form, customer_name: e.target.value })} placeholder="例：山田太郎 様" />
+            <input className={inputClass} value={form.customer_name} onChange={e => setForm({ ...form, customer_name: e.target.value })} placeholder="例：株式会社〇〇" />
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">ご住所</label>
@@ -201,122 +155,75 @@ export default function EstimateForm({
             <input className={inputClass} value={form.customer_contact} onChange={e => setForm({ ...form, customer_contact: e.target.value })} />
           </div>
           <div>
+            <label className="block text-sm font-medium mb-1">件名</label>
+            <input className={inputClass} value={form.project_name} onChange={e => setForm({ ...form, project_name: e.target.value })} placeholder="例：〇〇邸木造二階建家屋解体工事" />
+          </div>
+          <div>
             <label className="block text-sm font-medium mb-1">現場住所</label>
             <input className={inputClass} value={form.site_address} onChange={e => setForm({ ...form, site_address: e.target.value })} placeholder="例：岡山市南区豊浜町〇〇" />
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium mb-1">完工予定日</label>
+              <input type="date" className={inputClass} value={form.completion_date} onChange={e => setForm({ ...form, completion_date: e.target.value })} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">支払期日</label>
+              <input type="date" className={inputClass} value={form.payment_due_date} onChange={e => setForm({ ...form, payment_due_date: e.target.value })} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">支払条件</label>
+              <input className={inputClass} value={form.payment_terms} onChange={e => setForm({ ...form, payment_terms: e.target.value })} placeholder="例：現金100%" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">担当者</label>
+              <input className={inputClass} value={form.assignee} onChange={e => setForm({ ...form, assignee: e.target.value })} placeholder="例：武田" />
+            </div>
+          </div>
         </div>
       </section>
 
+      {CATEGORIES.map(cat => {
+        const catRows = rows.filter(r => r.category === cat.key)
+        return (
+          <section key={cat.key} className="bg-white rounded-lg shadow p-4">
+            <h2 className="font-bold mb-3 text-gray-700">{cat.label}</h2>
+            <div className="flex flex-col gap-3">
+              {catRows.map(row => (
+                <div key={row.key} className="border rounded p-3">
+                  <div className="flex justify-between items-start gap-2 mb-2">
+                    <input className={`${inputClass} flex-1`} value={row.name} placeholder="内訳（項目名）"
+                      onChange={e => updateRow(row.key, { name: e.target.value })} />
+                    <button type="button" onClick={() => removeRow(row.key)} className="text-gray-300 hover:text-red-400 text-xs shrink-0 py-2">削除</button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 items-center mb-2">
+                    <input type="number" className={inputClass} placeholder="数量" value={row.quantity}
+                      onChange={e => updateRow(row.key, { quantity: e.target.value })} />
+                    <select className={inputClass} value={row.unit} onChange={e => updateRow(row.key, { unit: e.target.value })}>
+                      {UNIT_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                    <input type="number" className={inputClass} placeholder="単価" value={row.unit_price}
+                      onChange={e => updateRow(row.key, { unit_price: e.target.value })} />
+                  </div>
+                  <input className={`${inputClass} mb-1`} placeholder="備考（※注記・任意）" value={row.note}
+                    onChange={e => updateRow(row.key, { note: e.target.value })} />
+                  <p className="text-right text-sm text-gray-600 mt-1">{fmt(itemAmount({ quantity: Number(row.quantity) || 0, unit_price: Number(row.unit_price) || 0 }))}</p>
+                </div>
+              ))}
+              {catRows.length === 0 && <p className="text-gray-400 text-sm text-center py-2">項目がありません</p>}
+              <button type="button" onClick={() => addRow(cat.key)} className="text-blue-600 text-sm text-left">+ 項目を追加</button>
+            </div>
+            <div className="flex justify-between items-center bg-gray-50 rounded px-3 py-2 text-sm mt-3">
+              <span className="text-gray-600">{cat.label} 合計</span>
+              <span className="font-bold">{fmt(totals.byCategory[cat.key])}</span>
+            </div>
+          </section>
+        )
+      })}
+
       <section className="bg-white rounded-lg shadow p-4">
-        <h2 className="font-bold mb-3 text-gray-700">解体工事本体</h2>
+        <h2 className="font-bold mb-3 text-gray-700">その他</h2>
         <div className="grid grid-cols-2 gap-3 mb-3">
-          <div className="col-span-2">
-            <label className="block text-sm font-medium mb-1">建物構造</label>
-            <select className={inputClass} value={form.building_structure} onChange={e => setForm({ ...form, building_structure: e.target.value })}>
-              {STRUCTURE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">延床面積（㎡）</label>
-            <input type="number" className={inputClass} value={form.floor_area} onChange={e => setForm({ ...form, floor_area: e.target.value })} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">㎡単価（円）</label>
-            <input type="number" className={inputClass} value={form.unit_price} onChange={e => setForm({ ...form, unit_price: e.target.value })} />
-          </div>
-        </div>
-        <div className="flex justify-between items-center bg-gray-50 rounded px-3 py-2 text-sm">
-          <span className="text-gray-600">本体工事金額</span>
-          <span className="font-bold">{fmt(buildingAmount)}</span>
-        </div>
-      </section>
-
-      <section className="bg-white rounded-lg shadow p-4">
-        <h2 className="font-bold mb-3 text-gray-700">廃材処分費</h2>
-        <div className="border rounded p-3 mb-3 bg-gray-50">
-          <p className="text-sm font-medium mb-2">マスタから追加</p>
-          <div className="flex flex-col gap-2">
-            <select className={inputClass} value={pickerSiteId} onChange={e => { setPickerSiteId(e.target.value); setPickerWasteTypeId('') }}>
-              <option value="">処分場を選択</option>
-              {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-            <div className="flex gap-2">
-              <select className={inputClass} value={pickerWasteTypeId} onChange={e => setPickerWasteTypeId(e.target.value)}>
-                <option value="">廃材種類を選択</option>
-                {filteredWasteTypes.map(w => <option key={w.id} value={w.id}>{w.name}（{w.unit_price.toLocaleString()}円/{w.unit}）</option>)}
-              </select>
-              <button type="button" onClick={addWasteRowFromMaster} className="bg-blue-600 text-white px-3 py-2 rounded text-sm whitespace-nowrap">追加</button>
-            </div>
-          </div>
-          <button type="button" onClick={addCustomWasteRow} className="text-blue-600 text-xs mt-2">+ 自由入力で項目を追加</button>
-        </div>
-
-        <div className="flex flex-col gap-3">
-          {wasteRows.map(row => (
-            <div key={row.key} className="border rounded p-3">
-              <div className="flex justify-between items-start gap-2 mb-2">
-                <input className={`${inputClass} flex-1`} value={row.name} placeholder="廃材名"
-                  onChange={e => updateWasteRow(row.key, { name: e.target.value })} />
-                <button type="button" onClick={() => removeWasteRow(row.key)} className="text-gray-300 hover:text-red-400 text-xs shrink-0 py-2">削除</button>
-              </div>
-              <div className="grid grid-cols-3 gap-2 items-center">
-                <input type="number" className={inputClass} placeholder="数量" value={row.quantity}
-                  onChange={e => updateWasteRow(row.key, { quantity: e.target.value })} />
-                <input className={inputClass} placeholder="単位" value={row.unit}
-                  onChange={e => updateWasteRow(row.key, { unit: e.target.value })} />
-                <input type="number" className={inputClass} placeholder="単価" value={row.unit_price}
-                  onChange={e => updateWasteRow(row.key, { unit_price: e.target.value })} />
-              </div>
-              <p className="text-right text-sm text-gray-600 mt-1">{fmt((Number(row.quantity) || 0) * (Number(row.unit_price) || 0))}</p>
-            </div>
-          ))}
-          {wasteRows.length === 0 && <p className="text-gray-400 text-sm text-center py-2">項目がありません</p>}
-        </div>
-        <div className="flex justify-between items-center bg-gray-50 rounded px-3 py-2 text-sm mt-3">
-          <span className="text-gray-600">廃材処分費 合計</span>
-          <span className="font-bold">{fmt(totals.wasteTotal)}</span>
-        </div>
-      </section>
-
-      <section className="bg-white rounded-lg shadow p-4">
-        <h2 className="font-bold mb-3 text-gray-700">付帯工事</h2>
-        <div className="flex flex-wrap gap-2 mb-3">
-          {INCIDENTAL_PRESETS.map(p => (
-            <button key={p} type="button" onClick={() => addExtraRow(p)}
-              className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-xs">+ {p}</button>
-          ))}
-          <button type="button" onClick={() => addExtraRow('')}
-            className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-xs">+ その他</button>
-        </div>
-        <div className="flex flex-col gap-2">
-          {extraRows.map(row => (
-            <div key={row.key} className="flex gap-2 items-center">
-              <input className={`${inputClass} flex-1`} placeholder="項目名" value={row.name}
-                onChange={e => updateExtraRow(row.key, { name: e.target.value })} />
-              <input type="number" className={`${inputClass} w-28`} placeholder="金額" value={row.amount}
-                onChange={e => updateExtraRow(row.key, { amount: e.target.value })} />
-              <button type="button" onClick={() => removeExtraRow(row.key)} className="text-gray-300 hover:text-red-400 text-xs shrink-0">削除</button>
-            </div>
-          ))}
-          {extraRows.length === 0 && <p className="text-gray-400 text-sm text-center py-2">項目がありません</p>}
-        </div>
-        <div className="flex justify-between items-center bg-gray-50 rounded px-3 py-2 text-sm mt-3">
-          <span className="text-gray-600">付帯工事 合計</span>
-          <span className="font-bold">{fmt(totals.extraTotal)}</span>
-        </div>
-      </section>
-
-      <section className="bg-white rounded-lg shadow p-4">
-        <h2 className="font-bold mb-3 text-gray-700">諸経費・値引き・その他</h2>
-        <div className="grid grid-cols-2 gap-3 mb-3">
-          <div>
-            <label className="block text-sm font-medium mb-1">諸経費率（%）</label>
-            <input type="number" className={inputClass} value={form.expense_rate} onChange={e => setForm({ ...form, expense_rate: e.target.value })} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">値引き額（円）</label>
-            <input type="number" className={inputClass} value={form.discount_amount} onChange={e => setForm({ ...form, discount_amount: e.target.value })} />
-          </div>
           <div>
             <label className="block text-sm font-medium mb-1">消費税率（%）</label>
             <input type="number" className={inputClass} value={form.tax_rate} onChange={e => setForm({ ...form, tax_rate: e.target.value })} />
@@ -347,7 +254,6 @@ export default function EstimateForm({
         <div className="max-w-2xl mx-auto flex flex-col gap-2">
           <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm text-gray-600">
             <span>小計</span><span className="text-right">{fmt(totals.subtotal)}</span>
-            <span>諸経費</span><span className="text-right">{fmt(totals.expenseAmount)}</span>
             <span>消費税</span><span className="text-right">{fmt(totals.taxAmount)}</span>
           </div>
           <div className="flex justify-between items-center border-t pt-2">

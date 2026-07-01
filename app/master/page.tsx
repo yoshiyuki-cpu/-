@@ -16,6 +16,7 @@ export default function MasterPage() {
   const [newWorker, setNewWorker] = useState({ name: '', company_name: '' })
   const [company, setCompany] = useState<CompanySettings | null>(null)
   const [savingCompany, setSavingCompany] = useState(false)
+  const [uploadingStamp, setUploadingStamp] = useState(false)
 
   useEffect(() => { loadAll() }, [])
 
@@ -39,12 +40,27 @@ export default function MasterPage() {
       name: company.name,
       postal_code: company.postal_code,
       address: company.address,
+      office_name: company.office_name,
       tel: company.tel,
       fax: company.fax,
+      email: company.email,
       license_no: company.license_no,
       representative: company.representative,
     }).eq('id', 1)
     setSavingCompany(false)
+  }
+
+  async function handleStampUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file || !company) return
+    setUploadingStamp(true)
+    const ext = file.name.split('.').pop()
+    const path = `company/stamp.${ext}`
+    await supabase.storage.from('project-files').upload(path, file, { upsert: true })
+    const { data: urlData } = supabase.storage.from('project-files').getPublicUrl(path)
+    await supabase.from('company_settings').update({ stamp_url: urlData.publicUrl }).eq('id', 1)
+    setCompany({ ...company, stamp_url: urlData.publicUrl })
+    setUploadingStamp(false)
   }
 
   async function addSite() {
@@ -257,6 +273,11 @@ export default function MasterPage() {
               <input className="w-full border rounded px-3 py-2 text-sm" value={company.address ?? ''}
                 onChange={e => setCompany({ ...company, address: e.target.value })} />
             </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">事務所名（任意）</label>
+              <input className="w-full border rounded px-3 py-2 text-sm" value={company.office_name ?? ''}
+                onChange={e => setCompany({ ...company, office_name: e.target.value })} placeholder="例：豊浜事務所B101" />
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-medium mb-1">電話番号</label>
@@ -270,6 +291,11 @@ export default function MasterPage() {
               </div>
             </div>
             <div>
+              <label className="block text-sm font-medium mb-1">Mailアドレス</label>
+              <input className="w-full border rounded px-3 py-2 text-sm" value={company.email ?? ''}
+                onChange={e => setCompany({ ...company, email: e.target.value })} placeholder="例：info@example.com" />
+            </div>
+            <div>
               <label className="block text-sm font-medium mb-1">建設業許可番号</label>
               <input className="w-full border rounded px-3 py-2 text-sm" value={company.license_no ?? ''}
                 onChange={e => setCompany({ ...company, license_no: e.target.value })} placeholder="例：岡山県知事許可（般-6）第00000号" />
@@ -278,6 +304,12 @@ export default function MasterPage() {
               <label className="block text-sm font-medium mb-1">代表者名</label>
               <input className="w-full border rounded px-3 py-2 text-sm" value={company.representative ?? ''}
                 onChange={e => setCompany({ ...company, representative: e.target.value })} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">印鑑（ハンコ）画像</label>
+              {company.stamp_url && <img src={company.stamp_url} alt="印" className="w-20 h-20 object-contain mb-2 border rounded" />}
+              <input type="file" accept="image/*" onChange={handleStampUpload} disabled={uploadingStamp} className="text-sm" />
+              {uploadingStamp && <p className="text-xs text-gray-500 mt-1">アップロード中...</p>}
             </div>
             <button onClick={saveCompany} disabled={savingCompany}
               className="bg-blue-600 text-white py-2 rounded text-sm font-medium disabled:opacity-50">

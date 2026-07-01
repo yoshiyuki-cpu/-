@@ -108,18 +108,19 @@ export type KyPhoto = {
 
 export type EstimateStatus = 'draft' | 'sent' | 'accepted' | 'rejected'
 
+export type EstimateCategory = 'demolition' | 'temporary' | 'disposal' | 'finishing' | 'other'
+
 export type Estimate = {
   id: number
   customer_name: string
   customer_address: string | null
   customer_contact: string | null
+  project_name: string | null
   site_address: string | null
-  building_structure: string | null
-  floor_area: number | null
-  unit_price: number | null
-  building_amount: number
-  expense_rate: number
-  discount_amount: number
+  completion_date: string | null
+  payment_due_date: string | null
+  payment_terms: string | null
+  assignee: string | null
   tax_rate: number
   status: EstimateStatus
   issue_date: string
@@ -128,22 +129,15 @@ export type Estimate = {
   created_at: string
 }
 
-export type EstimateWasteItem = {
+export type EstimateItem = {
   id: number
   estimate_id: number
-  waste_type_id: number | null
+  category: EstimateCategory
   name: string
-  unit: string
   quantity: number
+  unit: string
   unit_price: number
-  sort_order: number
-}
-
-export type EstimateExtraItem = {
-  id: number
-  estimate_id: number
-  name: string
-  amount: number
+  note: string | null
   sort_order: number
 }
 
@@ -152,8 +146,11 @@ export type CompanySettings = {
   name: string
   postal_code: string | null
   address: string | null
+  office_name: string | null
   tel: string | null
   fax: string | null
+  email: string | null
   license_no: string | null
   representative: string | null
+  stamp_url: string | null
 }

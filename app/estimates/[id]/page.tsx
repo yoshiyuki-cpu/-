@@ -2,13 +2,13 @@
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { supabase, Estimate, EstimateWasteItem, EstimateExtraItem } from '@/lib/supabase'
+import { supabase, Estimate, EstimateItem } from '@/lib/supabase'
 import EstimateForm from '../_components/EstimateForm'
 
 export default function EstimateDetailPage() {
   const { id } = useParams()
   const router = useRouter()
-  const [data, setData] = useState<{ estimate: Estimate; wasteItems: EstimateWasteItem[]; extraItems: EstimateExtraItem[] } | null>(null)
+  const [data, setData] = useState<{ estimate: Estimate; items: EstimateItem[] } | null>(null)
   const [loading, setLoading] = useState(true)
   const [deleting, setDeleting] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -16,13 +16,12 @@ export default function EstimateDetailPage() {
   useEffect(() => { load() }, [id])
 
   async function load() {
-    const [{ data: estimate }, { data: wasteItems }, { data: extraItems }] = await Promise.all([
+    const [{ data: estimate }, { data: items }] = await Promise.all([
       supabase.from('estimates').select('*').eq('id', id).single(),
-      supabase.from('estimate_waste_items').select('*').eq('estimate_id', id).order('sort_order'),
-      supabase.from('estimate_extra_items').select('*').eq('estimate_id', id).order('sort_order'),
+      supabase.from('estimate_items').select('*').eq('estimate_id', id).order('sort_order'),
     ])
     if (!estimate) { setLoading(false); return }
-    setData({ estimate, wasteItems: wasteItems ?? [], extraItems: extraItems ?? [] })
+    setData({ estimate, items: items ?? [] })
     setLoading(false)
   }
 
