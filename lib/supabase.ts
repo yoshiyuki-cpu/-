@@ -108,16 +108,16 @@ export type KyPhoto = {
 
 export type EstimateStatus = 'draft' | 'sent' | 'accepted' | 'rejected'
 
-export type EstimateCategory = 'demolition' | 'temporary' | 'disposal' | 'finishing' | 'other'
-
 export type Estimate = {
   id: number
   customer_name: string
+  customer_honorific: string
   customer_address: string | null
   customer_contact: string | null
+  estimate_no: string | null
   project_name: string | null
   site_address: string | null
-  completion_date: string | null
+  construction_period: string | null
   payment_due_date: string | null
   payment_terms: string | null
   assignee: string | null
@@ -132,12 +132,10 @@ export type Estimate = {
 export type EstimateItem = {
   id: number
   estimate_id: number
-  category: EstimateCategory
   name: string
   quantity: number
   unit: string
   unit_price: number
-  note: string | null
   sort_order: number
 }
 

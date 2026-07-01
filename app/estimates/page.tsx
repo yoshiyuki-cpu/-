@@ -35,7 +35,7 @@ export default function EstimatesPage() {
     if (!data) { setLoading(false); return }
 
     const withTotals = await Promise.all(data.map(async (e) => {
-      const { data: items } = await supabase.from('estimate_items').select('category, quantity, unit_price').eq('estimate_id', e.id)
+      const { data: items } = await supabase.from('estimate_items').select('quantity, unit_price').eq('estimate_id', e.id)
       const totals = calcEstimateTotals(e, items ?? [])
       return { ...e, total: totals.total }
     }))
