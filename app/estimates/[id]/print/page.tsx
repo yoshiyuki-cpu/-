@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { supabase, Estimate, EstimateItem, CompanySettings } from '@/lib/supabase'
 import { calcEstimateTotals, CATEGORIES, itemAmount } from '@/lib/estimateCalc'
@@ -12,8 +12,38 @@ export default function EstimatePrintPage() {
   const [items, setItems] = useState<EstimateItem[]>([])
   const [company, setCompany] = useState<CompanySettings | null>(null)
   const [loading, setLoading] = useState(true)
+  const [downloading, setDownloading] = useState(false)
+  const pageRefs = useRef<HTMLDivElement[]>([])
+  pageRefs.current = []
+  const registerPage = (el: HTMLDivElement | null) => {
+    if (el) pageRefs.current.push(el)
+  }
 
   useEffect(() => { load() }, [id])
+
+  async function handleDownloadPdf() {
+    if (!estimate) return
+    setDownloading(true)
+    const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
+      import('jspdf'),
+      import('html2canvas'),
+    ])
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4' })
+    const pageWidth = pdf.internal.pageSize.getWidth()
+    const pageHeight = pdf.internal.pageSize.getHeight()
+
+    for (let i = 0; i < pageRefs.current.length; i++) {
+      const canvas = await html2canvas(pageRefs.current[i], { scale: 2, backgroundColor: '#ffffff' })
+      const imgData = canvas.toDataURL('image/png')
+      const imgHeight = Math.min(pageHeight, (canvas.height * pageWidth) / canvas.width)
+      if (i > 0) pdf.addPage()
+      pdf.addImage(imgData, 'PNG', 0, 0, pageWidth, imgHeight)
+    }
+
+    const safeName = estimate.customer_name.replace(/[\\/:*?"<>|]/g, '')
+    pdf.save(`御見積書_${safeName}.pdf`)
+    setDownloading(false)
+  }
 
   async function load() {
     const [{ data: e }, { data: it }, { data: c }] = await Promise.all([
@@ -35,14 +65,17 @@ export default function EstimatePrintPage() {
 
   return (
     <div className="max-w-3xl mx-auto px-6 py-6 print:px-0 print:py-0 text-gray-900 text-sm">
-      <div className="no-print flex justify-end mb-4">
-        <button onClick={() => window.print()} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium">
-          印刷する（PDF保存も可）
+      <div className="no-print flex justify-end gap-2 mb-4">
+        <button onClick={() => window.print()} className="bg-gray-600 text-white px-4 py-2 rounded text-sm font-medium">
+          印刷する
+        </button>
+        <button onClick={handleDownloadPdf} disabled={downloading} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-50">
+          {downloading ? 'PDF作成中...' : 'PDFダウンロード'}
         </button>
       </div>
 
       {/* 表紙 */}
-      <div style={{ pageBreakAfter: categoriesWithItems.length ? 'always' : 'auto' }}>
+      <div ref={registerPage} className="bg-white p-8" style={{ pageBreakAfter: categoriesWithItems.length ? 'always' : 'auto' }}>
         <h1 className="text-center text-2xl font-bold tracking-widest mb-8">御 見 積 書</h1>
 
         <div className="flex justify-between items-start mb-8">
@@ -128,7 +161,7 @@ export default function EstimatePrintPage() {
         const tax = Math.round(subtotal * (Number(estimate.tax_rate) / 100))
         const notedItems = catItems.filter(i => i.note)
         return (
-          <div key={cat.key} style={{ pageBreakAfter: idx < categoriesWithItems.length - 1 ? 'always' : 'auto' }}>
+          <div key={cat.key} ref={registerPage} className="bg-white p-8" style={{ pageBreakAfter: idx < categoriesWithItems.length - 1 ? 'always' : 'auto' }}>
             <h2 className="text-center text-xl font-bold mb-6">内訳明細書（{cat.label}）</h2>
             <table className="w-full border-collapse mb-4">
               <thead>
