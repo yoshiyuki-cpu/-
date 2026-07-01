@@ -1,11 +1,11 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { supabase, DisposalSite, WasteType } from '@/lib/supabase'
+import { supabase, DisposalSite, WasteType, CompanySettings } from '@/lib/supabase'
 
 type Worker = { id: number; name: string; company_name: string | null }
 
 export default function MasterPage() {
-  const [tab, setTab] = useState<'disposal' | 'worker'>('disposal')
+  const [tab, setTab] = useState<'disposal' | 'worker' | 'company'>('disposal')
   const [sites, setSites] = useState<DisposalSite[]>([])
   const [wasteTypes, setWasteTypes] = useState<(WasteType & { disposal_sites?: DisposalSite })[]>([])
   const [workers, setWorkers] = useState<Worker[]>([])
@@ -14,18 +14,37 @@ export default function MasterPage() {
   const [newWaste, setNewWaste] = useState({ name: '', unit: 'kg', unit_price: '', entry_type: 'cost' })
   const [editingPrice, setEditingPrice] = useState<{ id: number; price: string } | null>(null)
   const [newWorker, setNewWorker] = useState({ name: '', company_name: '' })
+  const [company, setCompany] = useState<CompanySettings | null>(null)
+  const [savingCompany, setSavingCompany] = useState(false)
 
   useEffect(() => { loadAll() }, [])
 
   async function loadAll() {
-    const [{ data: s }, { data: w }, { data: wk }] = await Promise.all([
+    const [{ data: s }, { data: w }, { data: wk }, { data: c }] = await Promise.all([
       supabase.from('disposal_sites').select('*').order('name'),
       supabase.from('waste_types').select('*, disposal_sites(name)').order('name'),
       supabase.from('workers').select('*').order('name'),
+      supabase.from('company_settings').select('*').eq('id', 1).single(),
     ])
     setSites(s ?? [])
     setWasteTypes((w as any) ?? [])
     setWorkers(wk ?? [])
+    setCompany(c)
+  }
+
+  async function saveCompany() {
+    if (!company) return
+    setSavingCompany(true)
+    await supabase.from('company_settings').update({
+      name: company.name,
+      postal_code: company.postal_code,
+      address: company.address,
+      tel: company.tel,
+      fax: company.fax,
+      license_no: company.license_no,
+      representative: company.representative,
+    }).eq('id', 1)
+    setSavingCompany(false)
   }
 
   async function addSite() {
@@ -96,6 +115,7 @@ export default function MasterPage() {
       <div className="flex mb-4 border-b">
         <button className={tabClass('disposal')} onClick={() => setTab('disposal')}>処分場・廃材</button>
         <button className={tabClass('worker')} onClick={() => setTab('worker')}>作業員</button>
+        <button className={tabClass('company')} onClick={() => setTab('company')}>会社情報</button>
       </div>
 
       {tab === 'disposal' && (
@@ -214,6 +234,55 @@ export default function MasterPage() {
                 <button onClick={() => deleteWorker(w.id)} className="text-gray-300 hover:text-red-400 text-xs">削除</button>
               </div>
             ))}
+          </div>
+        </section>
+      )}
+
+      {tab === 'company' && company && (
+        <section className="bg-white rounded-lg shadow p-4">
+          <h2 className="font-bold mb-3 text-gray-700">会社情報（見積書に表示されます）</h2>
+          <div className="flex flex-col gap-3">
+            <div>
+              <label className="block text-sm font-medium mb-1">会社名</label>
+              <input className="w-full border rounded px-3 py-2 text-sm" value={company.name}
+                onChange={e => setCompany({ ...company, name: e.target.value })} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">郵便番号</label>
+              <input className="w-full border rounded px-3 py-2 text-sm" value={company.postal_code ?? ''}
+                onChange={e => setCompany({ ...company, postal_code: e.target.value })} placeholder="例：700-0000" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">住所</label>
+              <input className="w-full border rounded px-3 py-2 text-sm" value={company.address ?? ''}
+                onChange={e => setCompany({ ...company, address: e.target.value })} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium mb-1">電話番号</label>
+                <input className="w-full border rounded px-3 py-2 text-sm" value={company.tel ?? ''}
+                  onChange={e => setCompany({ ...company, tel: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">FAX番号</label>
+                <input className="w-full border rounded px-3 py-2 text-sm" value={company.fax ?? ''}
+                  onChange={e => setCompany({ ...company, fax: e.target.value })} />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">建設業許可番号</label>
+              <input className="w-full border rounded px-3 py-2 text-sm" value={company.license_no ?? ''}
+                onChange={e => setCompany({ ...company, license_no: e.target.value })} placeholder="例：岡山県知事許可（般-6）第00000号" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">代表者名</label>
+              <input className="w-full border rounded px-3 py-2 text-sm" value={company.representative ?? ''}
+                onChange={e => setCompany({ ...company, representative: e.target.value })} />
+            </div>
+            <button onClick={saveCompany} disabled={savingCompany}
+              className="bg-blue-600 text-white py-2 rounded text-sm font-medium disabled:opacity-50">
+              {savingCompany ? '保存中...' : '保存する'}
+            </button>
           </div>
         </section>
       )}

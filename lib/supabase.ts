@@ -105,3 +105,55 @@ export type KyPhoto = {
   photo_url: string
   created_at: string
 }
+
+export type EstimateStatus = 'draft' | 'sent' | 'accepted' | 'rejected'
+
+export type Estimate = {
+  id: number
+  customer_name: string
+  customer_address: string | null
+  customer_contact: string | null
+  site_address: string | null
+  building_structure: string | null
+  floor_area: number | null
+  unit_price: number | null
+  building_amount: number
+  expense_rate: number
+  discount_amount: number
+  tax_rate: number
+  status: EstimateStatus
+  issue_date: string
+  valid_until: string | null
+  notes: string | null
+  created_at: string
+}
+
+export type EstimateWasteItem = {
+  id: number
+  estimate_id: number
+  waste_type_id: number | null
+  name: string
+  unit: string
+  quantity: number
+  unit_price: number
+  sort_order: number
+}
+
+export type EstimateExtraItem = {
+  id: number
+  estimate_id: number
+  name: string
+  amount: number
+  sort_order: number
+}
+
+export type CompanySettings = {
+  id: number
+  name: string
+  postal_code: string | null
+  address: string | null
+  tel: string | null
+  fax: string | null
+  license_no: string | null
+  representative: string | null
+}
