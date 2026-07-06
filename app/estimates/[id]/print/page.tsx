@@ -24,6 +24,7 @@ export default function EstimatePrintPage() {
   const [company, setCompany] = useState<CompanySettings | null>(null)
   const [loading, setLoading] = useState(true)
   const [downloading, setDownloading] = useState(false)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
   const pageRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { load() }, [id])
@@ -43,32 +44,43 @@ export default function EstimatePrintPage() {
   async function handleDownloadPdf() {
     if (!estimate || !pageRef.current) return
     setDownloading(true)
-    const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
-      import('jspdf'),
-      import('html2canvas'),
-    ])
-    const canvas = await html2canvas(pageRef.current, { scale: 2, backgroundColor: '#ffffff' })
-    const pdf = new jsPDF({ unit: 'mm', format: 'a4' })
-    const pageWidth = pdf.internal.pageSize.getWidth()
-    const pageHeight = pdf.internal.pageSize.getHeight()
-    const imgWidth = pageWidth
-    const imgHeight = (canvas.height * imgWidth) / canvas.width
-    const imgData = canvas.toDataURL('image/png')
+    setDownloadError(null)
+    try {
+      // 通常のhtml2canvasはTailwind CSS v4が使うoklch()/lab()色関数を解析できず例外を投げるため、
+      // それに対応したフォーク(html2canvas-pro)を使用する
+      const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
+        import('jspdf'),
+        import('html2canvas-pro'),
+      ])
+      // 会社印鑑画像はSupabase Storageの別オリジンから読み込むため、useCORSを付けないと
+      // キャンバスが汚染され(tainted canvas)toDataURLが例外を投げてPDF作成が固まる
+      const canvas = await html2canvas(pageRef.current, { scale: 1.5, backgroundColor: '#ffffff', useCORS: true })
+      const pdf = new jsPDF({ unit: 'mm', format: 'a4' })
+      const pageWidth = pdf.internal.pageSize.getWidth()
+      const pageHeight = pdf.internal.pageSize.getHeight()
+      const imgWidth = pageWidth
+      const imgHeight = (canvas.height * imgWidth) / canvas.width
+      const imgData = canvas.toDataURL('image/jpeg', 0.9)
 
-    let heightLeft = imgHeight
-    let position = 0
-    pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
-    heightLeft -= pageHeight
-    while (heightLeft > 0) {
-      position = heightLeft - imgHeight
-      pdf.addPage()
-      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
+      let heightLeft = imgHeight
+      let position = 0
+      pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight)
       heightLeft -= pageHeight
-    }
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight
+        pdf.addPage()
+        pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight)
+        heightLeft -= pageHeight
+      }
 
-    const safeName = estimate.customer_name.replace(/[\\/:*?"<>|]/g, '')
-    pdf.save(`御見積書_${safeName}.pdf`)
-    setDownloading(false)
+      const safeName = estimate.customer_name.replace(/[\\/:*?"<>|]/g, '')
+      pdf.save(`御見積書_${safeName}.pdf`)
+    } catch (err) {
+      console.error('PDF generation failed', err)
+      setDownloadError('PDFの作成に失敗しました。「印刷する」から印刷ダイアログでPDF保存をお試しください。')
+    } finally {
+      setDownloading(false)
+    }
   }
 
   if (loading) return <p className="text-center py-10 text-gray-500">読み込み中...</p>
@@ -90,6 +102,7 @@ export default function EstimatePrintPage() {
           </button>
         </div>
       </div>
+      {downloadError && <p className="no-print text-red-500 text-sm mb-4 text-right">{downloadError}</p>}
 
       <div ref={pageRef} className="bg-white p-8 text-sm">
         <h1 className="text-center text-2xl font-bold tracking-widest mb-6">御見積書</h1>
@@ -121,7 +134,7 @@ export default function EstimatePrintPage() {
             {company?.fax && <p>FAX　：{company.fax}</p>}
             {company?.email && <p>Mail　：<span className="text-blue-700 underline">{company.email}</span></p>}
             {estimate.assignee && <p>担当者　：{estimate.assignee}</p>}
-            {company?.stamp_url && <img src={company.stamp_url} alt="印" className="w-16 h-16 object-contain absolute right-0 top-8" />}
+            {company?.stamp_url && <img src={company.stamp_url} alt="印" crossOrigin="anonymous" className="w-16 h-16 object-contain absolute right-0 top-8" />}
           </div>
         </div>
 
