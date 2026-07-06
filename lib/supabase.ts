@@ -129,7 +129,7 @@ export type Estimate = {
   valid_until: string | null
   notes: string | null
   layout_type: EstimateLayoutType
-  category_notes: Record<string, string>
+  category_notes: Record<string, string[]>
   created_at: string
 }
 

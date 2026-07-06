@@ -2,11 +2,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase, Estimate, EstimateItem, EstimateStatus, EstimateLayoutType } from '@/lib/supabase'
-import { calcEstimateTotals, UNIT_OPTIONS, ITEM_PRESETS, itemAmount, ESTIMATE_CATEGORIES } from '@/lib/estimateCalc'
+import { calcEstimateTotals, UNIT_OPTIONS, ITEM_PRESETS, itemAmount, ESTIMATE_CATEGORIES, NOTE_MARKS, normalizeCategoryNotes } from '@/lib/estimateCalc'
 
 type ItemRow = { key: string; name: string; quantity: string; unit: string; unit_price: string; category: string | null }
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ja-JP') + '円'
+
+// 新規作成時はカテゴリごとに※①〜④の入力欄をあらかじめ4つ並べておき、文章を埋めるだけで済むようにする
+function defaultCategoryNotes(): Record<string, string[]> {
+  return Object.fromEntries(ESTIMATE_CATEGORIES.map(c => [c, ['', '', '', '']]))
+}
 
 function emptyForm() {
   return {
@@ -45,7 +50,7 @@ export default function EstimateForm({
 
   const [form, setForm] = useState(emptyForm())
   const [rows, setRows] = useState<ItemRow[]>([])
-  const [categoryNotes, setCategoryNotes] = useState<Record<string, string>>({})
+  const [categoryNotes, setCategoryNotes] = useState<Record<string, string[]>>(defaultCategoryNotes())
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -71,7 +76,11 @@ export default function EstimateForm({
       notes: e.notes ?? '',
       layout_type: e.layout_type ?? 'simple',
     })
-    setCategoryNotes(e.category_notes ?? {})
+    setCategoryNotes(Object.fromEntries(ESTIMATE_CATEGORIES.map(c => {
+      const notes = normalizeCategoryNotes(e.category_notes?.[c])
+      while (notes.length < 4) notes.push('')
+      return [c, notes]
+    })))
     setRows(initial.items.map(i => ({
       key: nextKey(), name: i.name, quantity: String(i.quantity), unit: i.unit, unit_price: String(i.unit_price), category: i.category,
     })))
@@ -87,6 +96,22 @@ export default function EstimateForm({
 
   function removeRow(key: string) {
     setRows(rs => rs.filter(r => r.key !== key))
+  }
+
+  function updateCategoryNote(category: string, index: number, value: string) {
+    setCategoryNotes(prev => {
+      const arr = [...(prev[category] ?? [])]
+      arr[index] = value
+      return { ...prev, [category]: arr }
+    })
+  }
+
+  function addCategoryNote(category: string) {
+    setCategoryNotes(prev => ({ ...prev, [category]: [...(prev[category] ?? []), ''] }))
+  }
+
+  function removeCategoryNote(category: string, index: number) {
+    setCategoryNotes(prev => ({ ...prev, [category]: (prev[category] ?? []).filter((_, i) => i !== index) }))
   }
 
   const totals = useMemo(() => calcEstimateTotals(
@@ -118,7 +143,9 @@ export default function EstimateForm({
       valid_until: form.valid_until || null,
       notes: form.notes || null,
       layout_type: form.layout_type,
-      category_notes: categoryNotes,
+      category_notes: Object.fromEntries(
+        Object.entries(categoryNotes).map(([c, notes]) => [c, notes.map(n => n.trim()).filter(Boolean)])
+      ),
     }
 
     let id = estimateId
@@ -298,10 +325,20 @@ export default function EstimateForm({
                 <button type="button" onClick={() => addRow('', category)} className="text-blue-600 text-sm text-left">+ 項目を追加</button>
               </div>
               <div className="mt-3">
-                <label className="block text-sm font-medium mb-1">備考（このカテゴリの内訳ページに表示）</label>
-                <textarea className={`${inputClass} resize-none`} rows={2} value={categoryNotes[category] ?? ''}
-                  onChange={e => setCategoryNotes({ ...categoryNotes, [category]: e.target.value })}
-                  placeholder="例：※① 躯体総面積　家屋躯体部分48坪" />
+                <label className="block text-sm font-medium mb-1">備考（このカテゴリの内訳ページに表示。※の番号は自動で振られます）</label>
+                <div className="flex flex-col gap-2">
+                  {(categoryNotes[category] ?? []).map((note, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <span className="text-sm text-gray-500 w-8 shrink-0">※{NOTE_MARKS[i] ?? i + 1}</span>
+                      <input className={inputClass} value={note}
+                        onChange={e => updateCategoryNote(category, i, e.target.value)}
+                        placeholder="例：躯体総面積　家屋躯体部分48坪" />
+                      <button type="button" onClick={() => removeCategoryNote(category, i)}
+                        className="text-gray-300 hover:text-red-400 text-xs shrink-0 py-2">削除</button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => addCategoryNote(category)} className="text-blue-600 text-sm text-left">+ 備考を追加</button>
+                </div>
               </div>
             </section>
           )

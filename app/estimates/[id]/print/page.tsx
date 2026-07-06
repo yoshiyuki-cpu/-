@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { supabase, Estimate, EstimateItem, CompanySettings } from '@/lib/supabase'
-import { calcEstimateTotals, formatDateJp, ESTIMATE_CATEGORIES, SOLO_DETAIL_CATEGORIES, COMBINED_DETAIL_CATEGORIES } from '@/lib/estimateCalc'
+import { calcEstimateTotals, formatDateJp, ESTIMATE_CATEGORIES, SOLO_DETAIL_CATEGORIES, COMBINED_DETAIL_CATEGORIES, NOTE_MARKS, normalizeCategoryNotes } from '@/lib/estimateCalc'
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ja-JP')
 const MIN_ROWS = 15
@@ -134,7 +134,7 @@ function NotesBox({ notes }: { notes: string[] }) {
   return (
     <div className="border border-gray-800 p-3 text-sm">
       <p className="mb-1">備考：</p>
-      {notes.map((n, i) => <p key={i} className="whitespace-pre-wrap">{n}</p>)}
+      {notes.map((n, i) => <p key={i} className="whitespace-pre-wrap">※{NOTE_MARKS[i] ?? i + 1}　{n}</p>)}
     </div>
   )
 }
@@ -237,7 +237,8 @@ export default function EstimatePrintPage() {
   const groupedItems: Record<string, EstimateItem[]> = {}
   ESTIMATE_CATEGORIES.forEach(c => { groupedItems[c] = items.filter(i => i.category === c) })
   const combinedCats = COMBINED_DETAIL_CATEGORIES.filter(c => groupedItems[c].length > 0)
-  const categoryNotes = estimate.category_notes ?? {}
+  const categoryNotes: Record<string, string[]> = {}
+  ESTIMATE_CATEGORIES.forEach(c => { categoryNotes[c] = normalizeCategoryNotes(estimate.category_notes?.[c]) })
 
   const activeSections = estimate.layout_type === 'detailed'
     ? ['cover', ...SOLO_DETAIL_CATEGORIES.filter(c => groupedItems[c].length > 0), ...(combinedCats.length > 0 ? ['combined'] : [])]
@@ -337,7 +338,7 @@ export default function EstimatePrintPage() {
                 <h2 className="text-center text-lg font-bold mb-4">{category}</h2>
                 <DetailTable rows={rows} minRows={DETAIL_MIN_ROWS} />
                 <DetailFooter subtotal={catTotals.subtotal} tax={catTotals.taxAmount} />
-                <NotesBox notes={categoryNotes[category] ? [categoryNotes[category]] : []} />
+                <NotesBox notes={categoryNotes[category] ?? []} />
               </div>
             )
           })}
@@ -365,7 +366,7 @@ export default function EstimatePrintPage() {
                 subtotal={calcEstimateTotals(estimate, combinedCats.flatMap(c => groupedItems[c])).subtotal}
                 tax={calcEstimateTotals(estimate, combinedCats.flatMap(c => groupedItems[c])).taxAmount}
               />
-              <NotesBox notes={combinedCats.map(c => categoryNotes[c]).filter((n): n is string => !!n)} />
+              <NotesBox notes={combinedCats.flatMap(c => categoryNotes[c] ?? [])} />
             </div>
           )}
         </>
