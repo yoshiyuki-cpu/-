@@ -1,10 +1,10 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase, Estimate, EstimateItem, EstimateStatus } from '@/lib/supabase'
-import { calcEstimateTotals, UNIT_OPTIONS, ITEM_PRESETS, itemAmount } from '@/lib/estimateCalc'
+import { supabase, Estimate, EstimateItem, EstimateStatus, EstimateLayoutType } from '@/lib/supabase'
+import { calcEstimateTotals, UNIT_OPTIONS, ITEM_PRESETS, itemAmount, ESTIMATE_CATEGORIES } from '@/lib/estimateCalc'
 
-type ItemRow = { key: string; name: string; quantity: string; unit: string; unit_price: string }
+type ItemRow = { key: string; name: string; quantity: string; unit: string; unit_price: string; category: string | null }
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ja-JP') + '円'
 
@@ -26,6 +26,7 @@ function emptyForm() {
     issue_date: new Date().toISOString().slice(0, 10),
     valid_until: '',
     notes: '',
+    layout_type: 'simple' as EstimateLayoutType,
   }
 }
 
@@ -44,6 +45,7 @@ export default function EstimateForm({
 
   const [form, setForm] = useState(emptyForm())
   const [rows, setRows] = useState<ItemRow[]>([])
+  const [categoryNotes, setCategoryNotes] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -67,14 +69,16 @@ export default function EstimateForm({
       issue_date: e.issue_date,
       valid_until: e.valid_until ?? '',
       notes: e.notes ?? '',
+      layout_type: e.layout_type ?? 'simple',
     })
+    setCategoryNotes(e.category_notes ?? {})
     setRows(initial.items.map(i => ({
-      key: nextKey(), name: i.name, quantity: String(i.quantity), unit: i.unit, unit_price: String(i.unit_price),
+      key: nextKey(), name: i.name, quantity: String(i.quantity), unit: i.unit, unit_price: String(i.unit_price), category: i.category,
     })))
   }, [initial])
 
-  function addRow(name = '') {
-    setRows(rs => [...rs, { key: nextKey(), name, quantity: '1', unit: '式', unit_price: '' }])
+  function addRow(name = '', category: string | null = null) {
+    setRows(rs => [...rs, { key: nextKey(), name, quantity: '1', unit: '式', unit_price: '', category }])
   }
 
   function updateRow(key: string, patch: Partial<ItemRow>) {
@@ -113,6 +117,8 @@ export default function EstimateForm({
       issue_date: form.issue_date,
       valid_until: form.valid_until || null,
       notes: form.notes || null,
+      layout_type: form.layout_type,
+      category_notes: categoryNotes,
     }
 
     let id = estimateId
@@ -131,7 +137,7 @@ export default function EstimateForm({
       .filter(r => r.name)
       .map((r, i) => ({
         estimate_id: id, name: r.name, quantity: Number(r.quantity) || 0,
-        unit: r.unit, unit_price: Number(r.unit_price) || 0, sort_order: i,
+        unit: r.unit, unit_price: Number(r.unit_price) || 0, sort_order: i, category: r.category,
       }))
     if (itemsPayload.length) await supabase.from('estimate_items').insert(itemsPayload)
 
@@ -203,38 +209,104 @@ export default function EstimateForm({
       </section>
 
       <section className="bg-white rounded-lg shadow p-4">
-        <h2 className="font-bold mb-3 text-gray-700">明細</h2>
-        <div className="flex flex-wrap gap-2 mb-3">
-          {ITEM_PRESETS.map(p => (
-            <button key={p} type="button" onClick={() => addRow(p)}
-              className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-xs">+ {p}</button>
-          ))}
-        </div>
-        <div className="flex flex-col gap-3">
-          {rows.map((row, idx) => (
-            <div key={row.key} className="border rounded p-3">
-              <div className="flex justify-between items-start gap-2 mb-2">
-                <span className="text-xs text-gray-400 pt-2">No.{idx + 1}</span>
-                <input className={`${inputClass} flex-1`} value={row.name} placeholder="項目名"
-                  onChange={e => updateRow(row.key, { name: e.target.value })} />
-                <button type="button" onClick={() => removeRow(row.key)} className="text-gray-300 hover:text-red-400 text-xs shrink-0 py-2">削除</button>
-              </div>
-              <div className="grid grid-cols-3 gap-2 items-center">
-                <input type="number" className={inputClass} placeholder="単価" value={row.unit_price}
-                  onChange={e => updateRow(row.key, { unit_price: e.target.value })} />
-                <input type="number" className={inputClass} placeholder="数量" value={row.quantity}
-                  onChange={e => updateRow(row.key, { quantity: e.target.value })} />
-                <select className={inputClass} value={row.unit} onChange={e => updateRow(row.key, { unit: e.target.value })}>
-                  {UNIT_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}
-                </select>
-              </div>
-              <p className="text-right text-sm text-gray-600 mt-1">{fmt(itemAmount({ quantity: Number(row.quantity) || 0, unit_price: Number(row.unit_price) || 0 }))}</p>
-            </div>
-          ))}
-          {rows.length === 0 && <p className="text-gray-400 text-sm text-center py-2">項目がありません</p>}
-          <button type="button" onClick={() => addRow()} className="text-blue-600 text-sm text-left">+ 項目を追加</button>
-        </div>
+        <h2 className="font-bold mb-3 text-gray-700">見積り形式</h2>
+        {mode === 'new' ? (
+          <div className="flex flex-col gap-2">
+            <label className={`flex items-center gap-2 p-2 rounded border cursor-pointer ${form.layout_type === 'simple' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
+              <input type="radio" checked={form.layout_type === 'simple'} onChange={() => setForm({ ...form, layout_type: 'simple' })} />
+              <span className="text-sm">単一明細（No付きの一覧表1枚）</span>
+            </label>
+            <label className={`flex items-center gap-2 p-2 rounded border cursor-pointer ${form.layout_type === 'detailed' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
+              <input type="radio" checked={form.layout_type === 'detailed'} onChange={() => setForm({ ...form, layout_type: 'detailed' })} />
+              <span className="text-sm">内訳明細（カテゴリ別・表紙+複数ページ）</span>
+            </label>
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">{form.layout_type === 'detailed' ? '内訳明細（カテゴリ別・複数ページ）' : '単一明細（1枚）'}（作成後は変更できません）</p>
+        )}
       </section>
+
+      {form.layout_type === 'simple' ? (
+        <section className="bg-white rounded-lg shadow p-4">
+          <h2 className="font-bold mb-3 text-gray-700">明細</h2>
+          <div className="flex flex-wrap gap-2 mb-3">
+            {ITEM_PRESETS.map(p => (
+              <button key={p} type="button" onClick={() => addRow(p)}
+                className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-xs">+ {p}</button>
+            ))}
+          </div>
+          <div className="flex flex-col gap-3">
+            {rows.map((row, idx) => (
+              <div key={row.key} className="border rounded p-3">
+                <div className="flex justify-between items-start gap-2 mb-2">
+                  <span className="text-xs text-gray-400 pt-2">No.{idx + 1}</span>
+                  <input className={`${inputClass} flex-1`} value={row.name} placeholder="項目名"
+                    onChange={e => updateRow(row.key, { name: e.target.value })} />
+                  <button type="button" onClick={() => removeRow(row.key)} className="text-gray-300 hover:text-red-400 text-xs shrink-0 py-2">削除</button>
+                </div>
+                <div className="grid grid-cols-3 gap-2 items-center">
+                  <input type="number" className={inputClass} placeholder="単価" value={row.unit_price}
+                    onChange={e => updateRow(row.key, { unit_price: e.target.value })} />
+                  <input type="number" className={inputClass} placeholder="数量" value={row.quantity}
+                    onChange={e => updateRow(row.key, { quantity: e.target.value })} />
+                  <select className={inputClass} value={row.unit} onChange={e => updateRow(row.key, { unit: e.target.value })}>
+                    {UNIT_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                </div>
+                <p className="text-right text-sm text-gray-600 mt-1">{fmt(itemAmount({ quantity: Number(row.quantity) || 0, unit_price: Number(row.unit_price) || 0 }))}</p>
+              </div>
+            ))}
+            {rows.length === 0 && <p className="text-gray-400 text-sm text-center py-2">項目がありません</p>}
+            <button type="button" onClick={() => addRow()} className="text-blue-600 text-sm text-left">+ 項目を追加</button>
+          </div>
+        </section>
+      ) : (
+        ESTIMATE_CATEGORIES.map(category => {
+          const catRows = rows.filter(r => r.category === category)
+          const catTotal = catRows.reduce((s, r) => s + itemAmount({ quantity: Number(r.quantity) || 0, unit_price: Number(r.unit_price) || 0 }), 0)
+          return (
+            <section key={category} className="bg-white rounded-lg shadow p-4">
+              <div className="flex justify-between items-center mb-3">
+                <h2 className="font-bold text-gray-700">{category}</h2>
+                <span className="text-sm text-gray-600">{fmt(catTotal)}</span>
+              </div>
+              <div className="flex flex-col gap-3">
+                {catRows.map(row => {
+                  const idx = catRows.indexOf(row)
+                  return (
+                    <div key={row.key} className="border rounded p-3">
+                      <div className="flex justify-between items-start gap-2 mb-2">
+                        <span className="text-xs text-gray-400 pt-2">No.{idx + 1}</span>
+                        <input className={`${inputClass} flex-1`} value={row.name} placeholder="項目名（※①のように備考と対応させられます）"
+                          onChange={e => updateRow(row.key, { name: e.target.value })} />
+                        <button type="button" onClick={() => removeRow(row.key)} className="text-gray-300 hover:text-red-400 text-xs shrink-0 py-2">削除</button>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 items-center">
+                        <input type="number" className={inputClass} placeholder="単価" value={row.unit_price}
+                          onChange={e => updateRow(row.key, { unit_price: e.target.value })} />
+                        <input type="number" className={inputClass} placeholder="数量" value={row.quantity}
+                          onChange={e => updateRow(row.key, { quantity: e.target.value })} />
+                        <select className={inputClass} value={row.unit} onChange={e => updateRow(row.key, { unit: e.target.value })}>
+                          {UNIT_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}
+                        </select>
+                      </div>
+                      <p className="text-right text-sm text-gray-600 mt-1">{fmt(itemAmount({ quantity: Number(row.quantity) || 0, unit_price: Number(row.unit_price) || 0 }))}</p>
+                    </div>
+                  )
+                })}
+                {catRows.length === 0 && <p className="text-gray-400 text-sm text-center py-2">項目がありません</p>}
+                <button type="button" onClick={() => addRow('', category)} className="text-blue-600 text-sm text-left">+ 項目を追加</button>
+              </div>
+              <div className="mt-3">
+                <label className="block text-sm font-medium mb-1">備考（このカテゴリの内訳ページに表示）</label>
+                <textarea className={`${inputClass} resize-none`} rows={2} value={categoryNotes[category] ?? ''}
+                  onChange={e => setCategoryNotes({ ...categoryNotes, [category]: e.target.value })}
+                  placeholder="例：※① 躯体総面積　家屋躯体部分48坪" />
+              </div>
+            </section>
+          )
+        })
+      )}
 
       <section className="bg-white rounded-lg shadow p-4">
         <h2 className="font-bold mb-3 text-gray-700">その他</h2>

@@ -108,6 +108,8 @@ export type KyPhoto = {
 
 export type EstimateStatus = 'draft' | 'sent' | 'accepted' | 'rejected'
 
+export type EstimateLayoutType = 'simple' | 'detailed'
+
 export type Estimate = {
   id: number
   customer_name: string
@@ -126,6 +128,8 @@ export type Estimate = {
   issue_date: string
   valid_until: string | null
   notes: string | null
+  layout_type: EstimateLayoutType
+  category_notes: Record<string, string>
   created_at: string
 }
 
@@ -137,6 +141,7 @@ export type EstimateItem = {
   unit: string
   unit_price: number
   sort_order: number
+  category: string | null
 }
 
 export type CompanySettings = {
