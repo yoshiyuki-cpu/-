@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
+import Link from 'next/link'
 import { supabase, Estimate, EstimateItem, CompanySettings } from '@/lib/supabase'
 import { calcEstimateTotals, formatDateJp } from '@/lib/estimateCalc'
 
@@ -78,13 +79,16 @@ export default function EstimatePrintPage() {
 
   return (
     <div className="max-w-3xl mx-auto px-6 py-6 print:px-0 print:py-0 text-gray-900">
-      <div className="no-print flex justify-end gap-2 mb-4">
-        <button onClick={() => window.print()} className="bg-gray-600 text-white px-4 py-2 rounded text-sm font-medium">
-          印刷する
-        </button>
-        <button onClick={handleDownloadPdf} disabled={downloading} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-50">
-          {downloading ? 'PDF作成中...' : 'PDFダウンロード'}
-        </button>
+      <div className="no-print flex justify-between items-center gap-2 mb-4">
+        <Link href={`/estimates/${id}`} className="text-blue-600 text-sm font-medium">← 編集に戻る</Link>
+        <div className="flex gap-2">
+          <button onClick={() => window.print()} className="bg-gray-600 text-white px-4 py-2 rounded text-sm font-medium">
+            印刷する
+          </button>
+          <button onClick={handleDownloadPdf} disabled={downloading} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-50">
+            {downloading ? 'PDF作成中...' : 'PDFダウンロード'}
+          </button>
+        </div>
       </div>
 
       <div ref={pageRef} className="bg-white p-8 text-sm">

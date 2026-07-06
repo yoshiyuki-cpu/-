@@ -135,7 +135,7 @@ export default function EstimateForm({
       }))
     if (itemsPayload.length) await supabase.from('estimate_items').insert(itemsPayload)
 
-    router.push(`/estimates/${id}`)
+    router.push(`/estimates/${id}/print`)
   }
 
   const inputClass = 'w-full border rounded px-3 py-2 text-sm'
