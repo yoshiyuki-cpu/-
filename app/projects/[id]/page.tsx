@@ -109,7 +109,8 @@ export default function ProjectDetailPage() {
     })
 
     sortedLabor.forEach((e: any) => {
-      rows.push([e.date, '人工費', '', e.workers?.name ?? '', '1', '人', String(e.amount)])
+      const label = e.day_type === 'half' ? '人工費（半日）' : '人工費'
+      rows.push([e.date, label, '', e.workers?.name ?? '', '1', '人', String(e.amount)])
     })
 
     sortedOther.forEach((e: any) => {
@@ -390,6 +391,7 @@ export default function ProjectDetailPage() {
               <span className="mx-1">·</span>
               <span>{e.workers?.name}</span>
               {e.workers?.company_name && <span className="text-gray-500 ml-1">（{e.workers.company_name}）</span>}
+              {e.day_type === 'half' && <span className="text-orange-500 ml-1 text-xs font-medium">（半日）</span>}
             </div>
             <div className="flex items-center gap-3 shrink-0 ml-2">
               <span className="font-medium">{Number(e.amount).toLocaleString()}円</span>

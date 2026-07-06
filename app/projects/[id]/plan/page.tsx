@@ -63,7 +63,7 @@ export default function PlanPage() {
       supabase.from('labor_targets').select('*').eq('project_id', id).order('date'),
       supabase.from('waste_entries').select('amount, waste_types(entry_type)').eq('project_id', id),
       supabase.from('other_entries').select('entry_type, amount').eq('project_id', id),
-      supabase.from('labor_entries').select('date, amount').eq('project_id', id),
+      supabase.from('labor_entries').select('date, amount, day_type').eq('project_id', id),
     ])
 
     if (p) {
@@ -94,10 +94,10 @@ export default function PlanPage() {
     le?.forEach((e: any) => { labor += Number(e.amount) })
     setActuals({ waste_cost, labor, fuel, lease, scrap })
 
-    // 日別実績人工数
+    // 日別実績人工数（半日は0.5人でカウント）
     const byDate: Record<string, number> = {}
     le?.forEach((e: any) => {
-      byDate[e.date] = (byDate[e.date] ?? 0) + 1
+      byDate[e.date] = (byDate[e.date] ?? 0) + (e.day_type === 'half' ? 0.5 : 1)
     })
     setLaborActuals(byDate)
 

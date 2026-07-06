@@ -8,6 +8,35 @@ type Worker = { id: number; name: string; company_name: string | null }
 
 const LABOR_UNIT_PRICE_TAX_EXCL = 15000
 const LABOR_UNIT_PRICE = Math.round(LABOR_UNIT_PRICE_TAX_EXCL * 1.1)
+const LABOR_UNIT_PRICE_HALF = Math.round(LABOR_UNIT_PRICE / 2)
+type DayType = 'full' | 'half'
+
+// スマホカメラの写真は数MB〜十数MBあり、そのままbase64送信するとモバイルブラウザがメモリ不足で
+// 落ちたり(画面が真っ黒になる)Vercelのリクエストサイズ上限を超えたりするため、送信前に縮小・JPEG化する
+function resizeImageToBase64(file: File, maxDim = 1600, quality = 0.7): Promise<{ base64: string; mediaType: string }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const objectUrl = URL.createObjectURL(file)
+    img.onload = () => {
+      let { width, height } = img
+      if (width > maxDim || height > maxDim) {
+        const scale = maxDim / Math.max(width, height)
+        width = Math.round(width * scale)
+        height = Math.round(height * scale)
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      URL.revokeObjectURL(objectUrl)
+      if (!ctx) { reject(new Error('canvas unsupported')); return }
+      ctx.drawImage(img, 0, 0, width, height)
+      resolve({ base64: canvas.toDataURL('image/jpeg', quality).split(',')[1], mediaType: 'image/jpeg' })
+    }
+    img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('image load failed')) }
+    img.src = objectUrl
+  })
+}
 
 export default function EntryPage() {
   const { id } = useParams()
@@ -18,11 +47,12 @@ export default function EntryPage() {
   const [workers, setWorkers] = useState<Worker[]>([])
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
+  const [receiptError, setReceiptError] = useState<string | null>(null)
 
   const today = new Date().toISOString().split('T')[0]
   const [wasteForm, setWasteForm] = useState({ date: today, site_id: '', waste_type_id: '', quantity: '' })
   const [laborDate, setLaborDate] = useState(today)
-  const [selectedWorkers, setSelectedWorkers] = useState<number[]>([])
+  const [workerDayType, setWorkerDayType] = useState<Record<number, DayType>>({})
   const [otherForm, setOtherForm] = useState({ date: today, unit_price: '', note: '' })
 
   useEffect(() => { loadMaster() }, [])
@@ -39,9 +69,17 @@ export default function EntryPage() {
   }
 
   function toggleWorker(workerId: number) {
-    setSelectedWorkers(prev =>
-      prev.includes(workerId) ? prev.filter(id => id !== workerId) : [...prev, workerId]
-    )
+    setWorkerDayType(prev => {
+      if (workerId in prev) {
+        const { [workerId]: _removed, ...rest } = prev
+        return rest
+      }
+      return { ...prev, [workerId]: 'full' }
+    })
+  }
+
+  function setWorkerDay(workerId: number, dayType: DayType) {
+    setWorkerDayType(prev => ({ ...prev, [workerId]: dayType }))
   }
 
   const filteredTypes = wasteTypes.filter(w => String(w.disposal_site_id) === wasteForm.site_id)
@@ -70,19 +108,21 @@ export default function EntryPage() {
 
   async function saveLabor(e: React.FormEvent) {
     e.preventDefault()
-    if (selectedWorkers.length === 0) return
+    const entries = Object.entries(workerDayType)
+    if (entries.length === 0) return
     setSaving(true)
-    await Promise.all(selectedWorkers.map(workerId =>
+    await Promise.all(entries.map(([workerId, dayType]) =>
       supabase.from('labor_entries').insert({
         project_id: Number(id),
-        worker_id: workerId,
+        worker_id: Number(workerId),
         date: laborDate,
-        amount: LABOR_UNIT_PRICE,
+        day_type: dayType,
+        amount: dayType === 'half' ? LABOR_UNIT_PRICE_HALF : LABOR_UNIT_PRICE,
       })
     ))
     setSaving(false)
     setSuccess(true)
-    setSelectedWorkers([])
+    setWorkerDayType({})
     setTimeout(() => setSuccess(false), 2000)
   }
 
@@ -183,24 +223,44 @@ export default function EntryPage() {
               <p className="text-sm text-gray-400">マスタページで作業員を登録してください</p>
             )}
             <div className="flex flex-col gap-2">
-              {workers.map(w => (
-                <label key={w.id} className={`flex items-center gap-3 p-3 rounded border cursor-pointer ${selectedWorkers.includes(w.id) ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
-                  <input type="checkbox" checked={selectedWorkers.includes(w.id)}
-                    onChange={() => toggleWorker(w.id)} className="w-4 h-4" />
-                  <span className="text-sm">
-                    {w.name}
-                    {w.company_name && <span className="text-gray-500 ml-1">（{w.company_name}）</span>}
-                  </span>
-                </label>
-              ))}
+              {workers.map(w => {
+                const dayType = workerDayType[w.id]
+                const selected = dayType !== undefined
+                return (
+                  <div key={w.id} className={`rounded border p-3 ${selected ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input type="checkbox" checked={selected}
+                        onChange={() => toggleWorker(w.id)} className="w-4 h-4" />
+                      <span className="text-sm">
+                        {w.name}
+                        {w.company_name && <span className="text-gray-500 ml-1">（{w.company_name}）</span>}
+                      </span>
+                    </label>
+                    {selected && (
+                      <div className="flex gap-2 mt-2 ml-7">
+                        <button type="button" onClick={() => setWorkerDay(w.id, 'full')}
+                          className={`px-3 py-1 rounded text-xs font-medium border ${dayType === 'full' ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600'}`}>
+                          1日
+                        </button>
+                        <button type="button" onClick={() => setWorkerDay(w.id, 'half')}
+                          className={`px-3 py-1 rounded text-xs font-medium border ${dayType === 'half' ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600'}`}>
+                          半日
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </div>
-          {selectedWorkers.length > 0 && (
+          {Object.keys(workerDayType).length > 0 && (
             <p className="text-sm text-gray-600">
-              {selectedWorkers.length}名 × 16,500円 = <span className="font-bold text-gray-900">{(selectedWorkers.length * LABOR_UNIT_PRICE).toLocaleString()}円</span>（税込）
+              {Object.keys(workerDayType).length}名 = <span className="font-bold text-gray-900">
+                {Object.values(workerDayType).reduce((s, dt) => s + (dt === 'half' ? LABOR_UNIT_PRICE_HALF : LABOR_UNIT_PRICE), 0).toLocaleString()}円
+              </span>（税込）
             </p>
           )}
-          <button type="submit" disabled={saving || selectedWorkers.length === 0}
+          <button type="submit" disabled={saving || Object.keys(workerDayType).length === 0}
             className="bg-blue-600 text-white py-3 rounded font-medium disabled:opacity-50 text-base">
             {saving ? '保存中...' : '保存する'}
           </button>
@@ -227,26 +287,31 @@ export default function EntryPage() {
                     const file = e.target.files?.[0]
                     if (!file) return
                     setSaving(true)
-                    const reader = new FileReader()
-                    reader.onload = async (ev) => {
-                      const dataUrl = ev.target?.result as string
-                      const base64 = dataUrl.split(',')[1]
-                      const mediaType = file.type
+                    setReceiptError(null)
+                    try {
+                      const { base64, mediaType } = await resizeImageToBase64(file)
                       const res = await fetch('/api/analyze-receipt', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ imageBase64: base64, mediaType }),
                       })
+                      if (!res.ok) throw new Error('request failed')
                       const data = await res.json()
                       if (data.amount) {
                         setOtherForm(f => ({ ...f, unit_price: String(data.amount) }))
+                      } else {
+                        setReceiptError('金額を読み取れませんでした。金額を直接入力してください。')
                       }
+                    } catch {
+                      setReceiptError('読み取りに失敗しました。金額を直接入力してください。')
+                    } finally {
                       setSaving(false)
+                      e.target.value = ''
                     }
-                    reader.readAsDataURL(file)
                   }} />
               </label>
               {saving && <p className="text-sm text-blue-500">読み取り中...</p>}
+              {receiptError && <p className="text-sm text-red-500">{receiptError}</p>}
             </div>
           )}
           <div>

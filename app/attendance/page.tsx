@@ -8,6 +8,7 @@ type LaborEntry = {
   date: string
   amount: number
   worker_id: number
+  day_type: 'full' | 'half'
   projects: { name: string }
 }
 
@@ -43,22 +44,22 @@ export default function AttendancePage() {
   const daysInMonth = new Date(year, month, 0).getDate()
   const days = Array.from({ length: daysInMonth }, (_, i) => i + 1)
 
-  // 作業員ごとの出勤日マップ: workerId -> { day -> [現場名] }
-  const attendanceMap: Record<number, Record<number, string[]>> = {}
+  // 作業員ごとの出勤日マップ: workerId -> { day -> [{現場名, 全日/半日}] }
+  const attendanceMap: Record<number, Record<number, { site: string; dayType: 'full' | 'half' }[]>> = {}
   workers.forEach(w => { attendanceMap[w.id] = {} })
   entries.forEach(e => {
     const day = new Date(e.date).getDate()
     if (!attendanceMap[e.worker_id]) return
     if (!attendanceMap[e.worker_id][day]) attendanceMap[e.worker_id][day] = []
-    attendanceMap[e.worker_id][day].push(e.projects?.name ?? '')
+    attendanceMap[e.worker_id][day].push({ site: e.projects?.name ?? '', dayType: e.day_type ?? 'full' })
   })
 
-  // 作業員ごとの月合計日数・金額
+  // 作業員ごとの月合計日数・金額（半日は0.5日でカウント）
   const totals: Record<number, { days: number; amount: number }> = {}
   workers.forEach(w => {
     const workerEntries = entries.filter(e => e.worker_id === w.id)
     totals[w.id] = {
-      days: workerEntries.length,
+      days: workerEntries.reduce((s, e) => s + (e.day_type === 'half' ? 0.5 : 1), 0),
       amount: workerEntries.reduce((s, e) => s + Number(e.amount), 0),
     }
   })
@@ -105,7 +106,7 @@ export default function AttendancePage() {
               ))}
               <div className="flex justify-between items-center text-sm pt-2 font-bold">
                 <span>合計</span>
-                <span>{entries.length}日</span>
+                <span>{entries.reduce((s, e) => s + (e.day_type === 'half' ? 0.5 : 1), 0)}日</span>
               </div>
             </div>
           </div>
@@ -130,11 +131,18 @@ export default function AttendancePage() {
                       {w.company_name && <div className="text-gray-400 text-xs">{w.company_name}</div>}
                     </td>
                     {days.map(d => {
-                      const sites = attendanceMap[w.id]?.[d] ?? []
+                      const dayEntries = attendanceMap[w.id]?.[d] ?? []
+                      const dayUnits = dayEntries.reduce((s, x) => s + (x.dayType === 'half' ? 0.5 : 1), 0)
+                      const title = dayEntries.map(x => x.dayType === 'half' ? `${x.site}（半日）` : x.site).join(', ')
                       return (
                         <td key={d} className="px-1 py-2 text-center">
-                          {sites.length > 0 && (
-                            <span title={sites.join(', ')} className="inline-block w-5 h-5 bg-blue-500 text-white rounded-full text-xs leading-5 cursor-default">
+                          {dayUnits > 0 && dayUnits < 1 && (
+                            <span title={title} className="inline-block w-5 h-5 bg-orange-400 text-white rounded-full text-xs leading-5 cursor-default">
+                              半
+                            </span>
+                          )}
+                          {dayUnits >= 1 && (
+                            <span title={title} className="inline-block w-5 h-5 bg-blue-500 text-white rounded-full text-xs leading-5 cursor-default">
                               ○
                             </span>
                           )}
