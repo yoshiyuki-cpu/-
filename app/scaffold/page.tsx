@@ -3,6 +3,8 @@ import { useRef, useState } from 'react'
 
 type InputMode = 'directions' | 'rect' | 'perimeter'
 type UsageRow = { key: string; label: string; count: string }
+type Side = { label: string; length: number; height: number }
+type SideResult = Side & { spanCount: number; levelCount: number; tateji: number; nuno: number }
 
 // 単管の規格長（大きい順）
 const STANDARD_LENGTHS = [4, 3, 2, 1]
@@ -41,6 +43,12 @@ function scalePipeCounts(perUnit: Record<number, number>, units: number): Record
   return Object.fromEntries(Object.entries(perUnit).map(([len, count]) => [len, count * units]))
 }
 
+function addPipeCounts(a: Record<number, number>, b: Record<number, number>): Record<number, number> {
+  const result = { ...a }
+  Object.entries(b).forEach(([len, count]) => { result[Number(len)] = (result[Number(len)] ?? 0) + count })
+  return result
+}
+
 export default function ScaffoldCalcPage() {
   const keyCounter = useRef(0)
   const nextKey = () => `u${keyCounter.current++}`
@@ -50,6 +58,10 @@ export default function ScaffoldCalcPage() {
   const [west, setWest] = useState('')
   const [south, setSouth] = useState('')
   const [north, setNorth] = useState('')
+  const [eastHeight, setEastHeight] = useState('')
+  const [westHeight, setWestHeight] = useState('')
+  const [southHeight, setSouthHeight] = useState('')
+  const [northHeight, setNorthHeight] = useState('')
   const [depth, setDepth] = useState('')
   const [width, setWidth] = useState('')
   const [perimeterInput, setPerimeterInput] = useState('')
@@ -58,30 +70,44 @@ export default function ScaffoldCalcPage() {
   const [levelHeight, setLevelHeight] = useState('1.8')
   const [usageRows, setUsageRows] = useState<UsageRow[]>([])
 
-  const sideLengths = [Number(east) || 0, Number(west) || 0, Number(south) || 0, Number(north) || 0]
-
-  const perimeter =
-    mode === 'directions' ? sideLengths.reduce((a, b) => a + b, 0) :
-    mode === 'rect' ? (Number(depth) || 0) * 2 + (Number(width) || 0) * 2 :
-    Number(perimeterInput) || 0
-
   const span = Number(spanInterval) || 0
   const level = Number(levelHeight) || 0
   const h = Number(height) || 0
 
-  // 東西南北を個別入力している場合は、辺ごとに端数を切り上げてから合計する
-  // （辺をまたいで通し計算するより、実際の足場の組み方に近い）
-  const spanCount = span > 0
-    ? (mode === 'directions'
-      ? sideLengths.reduce((sum, len) => sum + (len > 0 ? Math.ceil(len / span) : 0), 0)
-      : Math.ceil(perimeter / span))
-    : 0
-  const levelCount = level > 0 ? Math.ceil(h / level) : 0
-  const tatejiCount = spanCount
-  const nunoCount = spanCount * levelCount
+  const perimeter =
+    mode === 'directions' ? (Number(east) || 0) + (Number(west) || 0) + (Number(south) || 0) + (Number(north) || 0) :
+    mode === 'rect' ? (Number(depth) || 0) * 2 + (Number(width) || 0) * 2 :
+    Number(perimeterInput) || 0
 
-  const tatejiPipes = scalePipeCounts(pipeBreakdown(h, STANDARD_LENGTHS), tatejiCount)
-  const nunoPipes = scalePipeCounts(pipeBreakdown(span, STANDARD_LENGTHS), nunoCount)
+  // 東西南北個別入力の場合は、辺ごとに長さ・高さが違う前提でスパン数・段数を計算する。
+  // それ以外のモードは建物全体を1つの辺として扱い、これまでと同じ計算結果になる
+  const sides: Side[] = mode === 'directions'
+    ? [
+        { label: '東', length: Number(east) || 0, height: Number(eastHeight) || 0 },
+        { label: '西', length: Number(west) || 0, height: Number(westHeight) || 0 },
+        { label: '南', length: Number(south) || 0, height: Number(southHeight) || 0 },
+        { label: '北', length: Number(north) || 0, height: Number(northHeight) || 0 },
+      ]
+    : [{ label: '全周', length: perimeter, height: h }]
+
+  const sideResults: SideResult[] = sides.map(s => {
+    const spanCount = span > 0 && s.length > 0 ? Math.ceil(s.length / span) : 0
+    const levelCount = level > 0 && s.height > 0 ? Math.ceil(s.height / level) : 0
+    return { ...s, spanCount, levelCount, tateji: spanCount, nuno: spanCount * levelCount }
+  })
+
+  const spanCount = sideResults.reduce((sum, s) => sum + s.spanCount, 0)
+  const tatejiCount = spanCount
+  const nunoCount = sideResults.reduce((sum, s) => sum + s.nuno, 0)
+
+  const tatejiPipes = sideResults.reduce(
+    (acc, s) => addPipeCounts(acc, scalePipeCounts(pipeBreakdown(s.height, STANDARD_LENGTHS), s.tateji)),
+    {} as Record<number, number>,
+  )
+  const nunoPipes = sideResults.reduce(
+    (acc, s) => addPipeCounts(acc, scalePipeCounts(pipeBreakdown(span, STANDARD_LENGTHS), s.nuno)),
+    {} as Record<number, number>,
+  )
   const totalPipes = Object.fromEntries(
     STANDARD_LENGTHS.map(len => [len, (tatejiPipes[len] ?? 0) + (nunoPipes[len] ?? 0)])
   )
@@ -97,7 +123,7 @@ export default function ScaffoldCalcPage() {
   }
 
   const inputClass = 'w-full border rounded px-3 py-3 text-base'
-  const hasResult = perimeter > 0 && h > 0 && span > 0 && level > 0
+  const hasResult = span > 0 && level > 0 && sideResults.some(s => s.spanCount > 0 && s.levelCount > 0)
 
   return (
     <div>
@@ -123,27 +149,29 @@ export default function ScaffoldCalcPage() {
         </div>
 
         {mode === 'directions' ? (
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium mb-1">東（m）</label>
-              <input type="number" inputMode="decimal" step="0.1" className={inputClass} value={east}
-                onChange={e => setEast(e.target.value)} placeholder="0" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">西（m）</label>
-              <input type="number" inputMode="decimal" step="0.1" className={inputClass} value={west}
-                onChange={e => setWest(e.target.value)} placeholder="0" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">南（m）</label>
-              <input type="number" inputMode="decimal" step="0.1" className={inputClass} value={south}
-                onChange={e => setSouth(e.target.value)} placeholder="0" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">北（m）</label>
-              <input type="number" inputMode="decimal" step="0.1" className={inputClass} value={north}
-                onChange={e => setNorth(e.target.value)} placeholder="0" />
-            </div>
+          <div className="flex flex-col gap-3">
+            {([
+              ['東', east, setEast, eastHeight, setEastHeight],
+              ['西', west, setWest, westHeight, setWestHeight],
+              ['南', south, setSouth, southHeight, setSouthHeight],
+              ['北', north, setNorth, northHeight, setNorthHeight],
+            ] as const).map(([label, len, setLen, ht, setHt]) => (
+              <div key={label} className="border rounded p-3">
+                <p className="text-sm font-medium mb-2">{label}</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">長さ（m）</label>
+                    <input type="number" inputMode="decimal" step="0.1" className={inputClass} value={len}
+                      onChange={e => setLen(e.target.value)} placeholder="0" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">高さ（m）</label>
+                    <input type="number" inputMode="decimal" step="0.1" className={inputClass} value={ht}
+                      onChange={e => setHt(e.target.value)} placeholder="0" />
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         ) : mode === 'rect' ? (
           <div className="grid grid-cols-2 gap-3">
@@ -170,11 +198,13 @@ export default function ScaffoldCalcPage() {
           <p className="text-sm text-gray-500">周囲長: <span className="font-medium text-gray-800">{perimeter.toFixed(1)}m</span></p>
         )}
 
-        <div>
-          <label className="block text-sm font-medium mb-1">建物の高さ（m）</label>
-          <input type="number" inputMode="decimal" step="0.1" className={inputClass} value={height}
-            onChange={e => setHeight(e.target.value)} placeholder="0" />
-        </div>
+        {mode !== 'directions' && (
+          <div>
+            <label className="block text-sm font-medium mb-1">建物の高さ（m）</label>
+            <input type="number" inputMode="decimal" step="0.1" className={inputClass} value={height}
+              onChange={e => setHeight(e.target.value)} placeholder="0" />
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -196,29 +226,49 @@ export default function ScaffoldCalcPage() {
           <p className="text-gray-400 text-sm text-center py-2">寸法・高さを入力してください</p>
         ) : (
           <div className="flex flex-col gap-1">
+            {mode === 'directions' && (
+              <table className="w-full text-sm mb-2">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-2 font-medium text-gray-600">辺</th>
+                    <th className="text-right py-2 font-medium text-gray-600">スパン数</th>
+                    <th className="text-right py-2 font-medium text-gray-600">段数</th>
+                    <th className="text-right py-2 font-medium text-gray-600">建地</th>
+                    <th className="text-right py-2 font-medium text-gray-600">布</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sideResults.map(s => (
+                    <tr key={s.label} className="border-b last:border-0">
+                      <td className="py-2">{s.label}</td>
+                      <td className="py-2 text-right">{s.spanCount}</td>
+                      <td className="py-2 text-right">{s.levelCount}</td>
+                      <td className="py-2 text-right">{s.tateji}本</td>
+                      <td className="py-2 text-right">{s.nuno}本</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
             <div className="flex justify-between items-center text-sm py-2 border-b">
-              <span className="text-gray-600">スパン数</span>
+              <span className="text-gray-600">スパン数合計</span>
               <span className="font-bold text-gray-900">{spanCount}スパン</span>
             </div>
             <div className="flex justify-between items-center text-sm py-2 border-b">
-              <span className="text-gray-600">段数</span>
-              <span className="font-bold text-gray-900">{levelCount}段</span>
-            </div>
-            <div className="flex justify-between items-center text-sm py-2 border-b">
-              <span className="text-gray-600">建地本数</span>
+              <span className="text-gray-600">建地本数合計</span>
               <span className="font-bold text-gray-900">{tatejiCount}本</span>
             </div>
             <div className="flex justify-between items-center text-sm py-2">
-              <span className="text-gray-600">布本数</span>
+              <span className="text-gray-600">布本数合計</span>
               <span className="font-bold text-gray-900">{nunoCount}本</span>
             </div>
           </div>
         )}
         <p className="text-xs text-gray-400 mt-3">
           {mode === 'directions'
-            ? '東西南北それぞれの辺の長さ÷スパン間隔を切り上げてから合計しています。'
-            : '周囲長÷スパン間隔でスパン数を切り上げ計算しています。'}
-          高さ÷段の高さで段数を切り上げ計算。建地本数はスパン数と同数（周囲を一周する想定）、布本数はスパン数×段数（一側足場）。現場の形状や補強によって実際に必要な本数は変わるため、目安としてご利用ください。
+            ? '辺（東西南北）ごとに、長さ÷スパン間隔・高さ÷段の高さを切り上げてから計算し、最後に合計しています。'
+            : '周囲長÷スパン間隔でスパン数、高さ÷段の高さで段数を切り上げ計算しています。'}
+          建地本数はスパン数と同数（周囲を一周する想定）、布本数はスパン数×段数（一側足場）。現場の形状や補強によって実際に必要な本数は変わるため、目安としてご利用ください。
         </p>
       </div>
 
@@ -246,7 +296,7 @@ export default function ScaffoldCalcPage() {
             </tbody>
           </table>
           <p className="text-xs text-gray-400 mt-3">
-            建地は1本あたり高さ{h || 0}mを規格長で継いだ場合の内訳、布は1本あたりスパン間隔{span || 0}mに収まる規格1本の内訳です。
+            建地は辺（または全体）の高さを規格長で継いだ場合の内訳、布は1本あたりスパン間隔{span || 0}mに収まる規格1本の内訳です。
           </p>
         </div>
       )}
