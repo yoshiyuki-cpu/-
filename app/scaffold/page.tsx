@@ -1,7 +1,7 @@
 'use client'
 import { useRef, useState } from 'react'
 
-type InputMode = 'perimeter' | 'sides'
+type InputMode = 'directions' | 'rect' | 'perimeter'
 type UsageRow = { key: string; label: string; count: string }
 
 // 単管の規格長（大きい順）
@@ -45,7 +45,11 @@ export default function ScaffoldCalcPage() {
   const keyCounter = useRef(0)
   const nextKey = () => `u${keyCounter.current++}`
 
-  const [mode, setMode] = useState<InputMode>('sides')
+  const [mode, setMode] = useState<InputMode>('directions')
+  const [east, setEast] = useState('')
+  const [west, setWest] = useState('')
+  const [south, setSouth] = useState('')
+  const [north, setNorth] = useState('')
   const [depth, setDepth] = useState('')
   const [width, setWidth] = useState('')
   const [perimeterInput, setPerimeterInput] = useState('')
@@ -54,15 +58,24 @@ export default function ScaffoldCalcPage() {
   const [levelHeight, setLevelHeight] = useState('1.8')
   const [usageRows, setUsageRows] = useState<UsageRow[]>([])
 
-  const perimeter = mode === 'sides'
-    ? (Number(depth) || 0) * 2 + (Number(width) || 0) * 2
-    : Number(perimeterInput) || 0
+  const sideLengths = [Number(east) || 0, Number(west) || 0, Number(south) || 0, Number(north) || 0]
+
+  const perimeter =
+    mode === 'directions' ? sideLengths.reduce((a, b) => a + b, 0) :
+    mode === 'rect' ? (Number(depth) || 0) * 2 + (Number(width) || 0) * 2 :
+    Number(perimeterInput) || 0
 
   const span = Number(spanInterval) || 0
   const level = Number(levelHeight) || 0
   const h = Number(height) || 0
 
-  const spanCount = span > 0 ? Math.ceil(perimeter / span) : 0
+  // 東西南北を個別入力している場合は、辺ごとに端数を切り上げてから合計する
+  // （辺をまたいで通し計算するより、実際の足場の組み方に近い）
+  const spanCount = span > 0
+    ? (mode === 'directions'
+      ? sideLengths.reduce((sum, len) => sum + (len > 0 ? Math.ceil(len / span) : 0), 0)
+      : Math.ceil(perimeter / span))
+    : 0
   const levelCount = level > 0 ? Math.ceil(h / level) : 0
   const tatejiCount = spanCount
   const nunoCount = spanCount * levelCount
@@ -93,19 +106,46 @@ export default function ScaffoldCalcPage() {
       <div className="bg-white rounded-lg shadow p-4 flex flex-col gap-4">
         <div>
           <label className="block text-sm font-medium mb-2">建物の寸法の入力方法</label>
-          <div className="flex gap-2">
-            <button type="button" onClick={() => setMode('sides')}
-              className={`flex-1 py-2 rounded border text-sm font-medium ${mode === 'sides' ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600'}`}>
-              縦×横から計算
+          <div className="grid grid-cols-3 gap-2">
+            <button type="button" onClick={() => setMode('directions')}
+              className={`py-2 rounded border text-sm font-medium ${mode === 'directions' ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600'}`}>
+              東西南北
+            </button>
+            <button type="button" onClick={() => setMode('rect')}
+              className={`py-2 rounded border text-sm font-medium ${mode === 'rect' ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600'}`}>
+              縦×横
             </button>
             <button type="button" onClick={() => setMode('perimeter')}
-              className={`flex-1 py-2 rounded border text-sm font-medium ${mode === 'perimeter' ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600'}`}>
-              周囲長を直接入力
+              className={`py-2 rounded border text-sm font-medium ${mode === 'perimeter' ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600'}`}>
+              周囲長
             </button>
           </div>
         </div>
 
-        {mode === 'sides' ? (
+        {mode === 'directions' ? (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium mb-1">東（m）</label>
+              <input type="number" inputMode="decimal" step="0.1" className={inputClass} value={east}
+                onChange={e => setEast(e.target.value)} placeholder="0" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">西（m）</label>
+              <input type="number" inputMode="decimal" step="0.1" className={inputClass} value={west}
+                onChange={e => setWest(e.target.value)} placeholder="0" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">南（m）</label>
+              <input type="number" inputMode="decimal" step="0.1" className={inputClass} value={south}
+                onChange={e => setSouth(e.target.value)} placeholder="0" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">北（m）</label>
+              <input type="number" inputMode="decimal" step="0.1" className={inputClass} value={north}
+                onChange={e => setNorth(e.target.value)} placeholder="0" />
+            </div>
+          </div>
+        ) : mode === 'rect' ? (
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium mb-1">縦（m）</label>
@@ -175,7 +215,10 @@ export default function ScaffoldCalcPage() {
           </div>
         )}
         <p className="text-xs text-gray-400 mt-3">
-          周囲長÷スパン間隔でスパン数、高さ÷段の高さで段数を切り上げ計算。建地本数はスパン数と同数（周囲を一周する想定）、布本数はスパン数×段数（一側足場）。現場の形状や補強によって実際に必要な本数は変わるため、目安としてご利用ください。
+          {mode === 'directions'
+            ? '東西南北それぞれの辺の長さ÷スパン間隔を切り上げてから合計しています。'
+            : '周囲長÷スパン間隔でスパン数を切り上げ計算しています。'}
+          高さ÷段の高さで段数を切り上げ計算。建地本数はスパン数と同数（周囲を一周する想定）、布本数はスパン数×段数（一側足場）。現場の形状や補強によって実際に必要な本数は変わるため、目安としてご利用ください。
         </p>
       </div>
 
