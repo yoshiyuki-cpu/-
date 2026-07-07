@@ -19,6 +19,7 @@ export default function RootLayout({
           <nav className="flex gap-4 ml-auto text-sm">
             <a href="/" className="hover:underline">現場一覧</a>
             <a href="/estimates" className="hover:underline">見積り</a>
+            <a href="/scaffold" className="hover:underline">足場計算</a>
             <a href="/attendance" className="hover:underline">出面</a>
             <a href="/master" className="hover:underline">マスタ</a>
           </nav>
