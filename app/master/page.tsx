@@ -185,6 +185,7 @@ export default function MasterPage() {
                     <select className="flex-1 border rounded px-2 py-1 text-sm" value={newWaste.unit}
                       onChange={e => setNewWaste({ ...newWaste, unit: e.target.value })}>
                       <option value="kg">kg</option>
+                      <option value="トン">トン</option>
                       <option value="㎥">㎥</option>
                       <option value="枚">枚</option>
                       <option value="台">台</option>
@@ -197,8 +198,8 @@ export default function MasterPage() {
                     </select>
                   </div>
                   <div className="flex gap-2">
-                    <input type="number" className="flex-1 border rounded px-3 py-1 text-sm" value={newWaste.unit_price}
-                      onChange={e => setNewWaste({ ...newWaste, unit_price: e.target.value })} placeholder="単価（円）" />
+                    <input type="number" inputMode="decimal" step="0.01" className="flex-1 border rounded px-3 py-1 text-sm" value={newWaste.unit_price}
+                      onChange={e => setNewWaste({ ...newWaste, unit_price: e.target.value })} placeholder="単価（円、小数可）" />
                     <button onClick={addWasteType} className="bg-blue-600 text-white px-3 py-1 rounded text-sm">追加</button>
                   </div>
                 </div>
@@ -217,7 +218,7 @@ export default function MasterPage() {
                   <div className="flex items-center gap-2">
                     {editingPrice?.id === w.id ? (
                       <div className="flex items-center gap-1">
-                        <input type="number" className="border rounded px-2 py-1 text-sm w-24"
+                        <input type="number" inputMode="decimal" step="0.01" className="border rounded px-2 py-1 text-sm w-24"
                           value={editingPrice.price}
                           onChange={e => setEditingPrice({ ...editingPrice, price: e.target.value })} />
                         <span className="text-xs text-gray-500">円/{w.unit}</span>
