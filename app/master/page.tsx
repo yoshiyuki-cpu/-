@@ -91,13 +91,21 @@ export default function MasterPage() {
 
   async function deleteSite(id: number) {
     if (!confirm('この処分場と関連する廃材種類をすべて削除しますか？')) return
-    await supabase.from('disposal_sites').delete().eq('id', id)
+    const { error } = await supabase.from('disposal_sites').delete().eq('id', id)
+    if (error) {
+      alert('この処分場は使用実績（廃材記録）があるため削除できません。先に現場側の記録を削除するか、廃材種類だけを使わないようにしてください。')
+      return
+    }
     loadAll()
   }
 
   async function deleteWasteType(id: number) {
     if (!confirm('この廃材種類を削除しますか？')) return
-    await supabase.from('waste_types').delete().eq('id', id)
+    const { error } = await supabase.from('waste_types').delete().eq('id', id)
+    if (error) {
+      alert('この廃材種類は使用実績（廃材記録）があるため削除できません。')
+      return
+    }
     loadAll()
   }
 
@@ -113,7 +121,11 @@ export default function MasterPage() {
 
   async function deleteWorker(id: number) {
     if (!confirm('この作業員を削除しますか？')) return
-    await supabase.from('workers').delete().eq('id', id)
+    const { error } = await supabase.from('workers').delete().eq('id', id)
+    if (error) {
+      alert('この作業員は使用実績（人工記録）があるため削除できません。')
+      return
+    }
     loadAll()
   }
 
