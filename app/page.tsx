@@ -30,10 +30,11 @@ export default function HomePage() {
     if (!projectData) { setLoading(false); return }
 
     const withTotals = await Promise.all(projectData.map(async (p) => {
-      const [{ data: wasteEntries }, { data: otherEntries }, { data: laborEntries }] = await Promise.all([
+      const [{ data: wasteEntries }, { data: otherEntries }, { data: laborEntries }, { data: scrapRecords }] = await Promise.all([
         supabase.from('waste_entries').select('amount, waste_types(entry_type)').eq('project_id', p.id),
         supabase.from('other_entries').select('entry_type, amount').eq('project_id', p.id),
         supabase.from('labor_entries').select('amount').eq('project_id', p.id),
+        supabase.from('scrap_records').select('amount').eq('project_id', p.id),
       ])
 
       let waste_cost = 0, scrap_revenue = 0
@@ -41,6 +42,7 @@ export default function HomePage() {
         if (e.waste_types?.entry_type === 'cost') waste_cost += Number(e.amount)
         else scrap_revenue += Number(e.amount)
       })
+      scrapRecords?.forEach((r: any) => { scrap_revenue += Number(r.amount) })
 
       let labor_amount = 0, fuel_amount = 0, lease_amount = 0
       otherEntries?.forEach((e: any) => {

@@ -29,6 +29,7 @@ export default function ProjectDetailPage() {
   const [wasteEntries, setWasteEntries] = useState<WasteEntry[]>([])
   const [otherEntries, setOtherEntries] = useState<OtherEntry[]>([])
   const [laborEntries, setLaborEntries] = useState<any[]>([])
+  const [scrapRecords, setScrapRecords] = useState<{ date: string; items: string | null; note: string | null; amount: number }[]>([])
   const [loading, setLoading] = useState(true)
   const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
@@ -43,17 +44,19 @@ export default function ProjectDetailPage() {
   useEffect(() => { load() }, [id])
 
   async function load() {
-    const [{ data: p }, { data: we }, { data: oe }, { data: le }] = await Promise.all([
+    const [{ data: p }, { data: we }, { data: oe }, { data: le }, { data: sr }] = await Promise.all([
       supabase.from('projects').select('*').eq('id', id).single(),
       supabase.from('waste_entries').select('*, waste_types(name, unit, entry_type, disposal_sites(name))').eq('project_id', id).order('date', { ascending: false }),
       supabase.from('other_entries').select('*').eq('project_id', id).order('date', { ascending: false }),
       supabase.from('labor_entries').select('*, workers(name, company_name)').eq('project_id', id).order('date', { ascending: false }),
+      supabase.from('scrap_records').select('date, items, note, amount').eq('project_id', id),
     ])
     setProject(p)
     setNotesValue(p?.notes ?? '')
     setWasteEntries((we as any) ?? [])
     setOtherEntries((oe as any) ?? [])
     setLaborEntries((le as any) ?? [])
+    setScrapRecords(sr ?? [])
     setLoading(false)
   }
 
@@ -118,6 +121,13 @@ export default function ProjectDetailPage() {
       rows.push([e.date, label, '', e.note ?? '', '1', '式', String(e.amount)])
     })
 
+    scrapRecords.forEach((r) => {
+      let itemLabel = ''
+      try { itemLabel = r.items ? JSON.parse(r.items).map((i: any) => i.name).join('・') : (r.items ?? '') }
+      catch { itemLabel = r.items ?? '' }
+      rows.push([r.date, 'スクラップ収益', '', itemLabel || r.note || '', '1', '式', String(r.amount)])
+    })
+
     const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n')
     const bom = '﻿'
     const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8;' })
@@ -136,6 +146,7 @@ export default function ProjectDetailPage() {
 
   const wasteCost = wasteEntries.filter((e: any) => e.waste_types?.entry_type === 'cost').reduce((s, e) => s + Number(e.amount), 0)
   const scrapRevenue = wasteEntries.filter((e: any) => e.waste_types?.entry_type === 'revenue').reduce((s, e) => s + Number(e.amount), 0)
+    + scrapRecords.reduce((s, r) => s + Number(r.amount), 0)
   const laborAmt = laborEntries.reduce((s, e) => s + Number(e.amount), 0) + otherEntries.filter(e => e.entry_type === 'labor').reduce((s, e) => s + Number(e.amount), 0)
   const fuelAmt = otherEntries.filter(e => e.entry_type === 'fuel').reduce((s, e) => s + Number(e.amount), 0)
   const leaseAmt = otherEntries.filter(e => e.entry_type === 'lease').reduce((s, e) => s + Number(e.amount), 0)

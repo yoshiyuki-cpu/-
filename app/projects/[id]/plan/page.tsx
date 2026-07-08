@@ -57,6 +57,7 @@ export default function PlanPage() {
       { data: we },
       { data: oe },
       { data: le },
+      { data: sr },
     ] = await Promise.all([
       supabase.from('projects').select('*').eq('id', id).single(),
       supabase.from('work_processes').select('*').eq('project_id', id).order('start_date'),
@@ -64,6 +65,7 @@ export default function PlanPage() {
       supabase.from('waste_entries').select('amount, waste_types(entry_type)').eq('project_id', id),
       supabase.from('other_entries').select('entry_type, amount').eq('project_id', id),
       supabase.from('labor_entries').select('date, amount, day_type').eq('project_id', id),
+      supabase.from('scrap_records').select('amount').eq('project_id', id),
     ])
 
     if (p) {
@@ -86,6 +88,7 @@ export default function PlanPage() {
       if (e.waste_types?.entry_type === 'cost') waste_cost += Number(e.amount)
       else scrap += Number(e.amount)
     })
+    sr?.forEach((r: any) => { scrap += Number(r.amount) })
     oe?.forEach((e: any) => {
       if (e.entry_type === 'labor') labor += Number(e.amount)
       else if (e.entry_type === 'fuel') fuel += Number(e.amount)
