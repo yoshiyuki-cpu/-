@@ -95,6 +95,7 @@ export type MeetingNote = {
   danger_points: string | null
   cautions: string | null
   notices: string | null
+  photo_url: string | null
   created_at: string
 }
 

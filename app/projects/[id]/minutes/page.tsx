@@ -1,11 +1,38 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase, MeetingNote } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
 
 type Mode = 'list' | 'new' | 'detail'
 
 const today = new Date().toISOString().split('T')[0]
+
+// スマホカメラの写真は数MB〜十数MBあり、そのままbase64送信するとモバイルブラウザがメモリ不足で
+// 落ちたりVercelのリクエストサイズ上限を超えたりするため、送信前に縮小・JPEG化する
+function resizeImageToBase64(file: File, maxDim = 1600, quality = 0.7): Promise<{ base64: string; mediaType: string }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const objectUrl = URL.createObjectURL(file)
+    img.onload = () => {
+      let { width, height } = img
+      if (width > maxDim || height > maxDim) {
+        const scale = maxDim / Math.max(width, height)
+        width = Math.round(width * scale)
+        height = Math.round(height * scale)
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      URL.revokeObjectURL(objectUrl)
+      if (!ctx) { reject(new Error('canvas unsupported')); return }
+      ctx.drawImage(img, 0, 0, width, height)
+      resolve({ base64: canvas.toDataURL('image/jpeg', quality).split(',')[1], mediaType: 'image/jpeg' })
+    }
+    img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('image load failed')) }
+    img.src = objectUrl
+  })
+}
 
 export default function MinutesPage() {
   const { id } = useParams()
@@ -19,6 +46,12 @@ export default function MinutesPage() {
   const [form, setForm] = useState({ date: today, danger_points: '', cautions: '', notices: '' })
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState({ danger_points: '', cautions: '', notices: '' })
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null)
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
+  const [analyzingPhoto, setAnalyzingPhoto] = useState(false)
+  const [photoError, setPhotoError] = useState<string | null>(null)
+  const [enlarged, setEnlarged] = useState<string | null>(null)
+  const photoInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { load() }, [id])
 
@@ -33,6 +66,46 @@ export default function MinutesPage() {
     setLoading(false)
   }
 
+  async function handlePhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setPhotoError(null)
+    setUploadingPhoto(true)
+    try {
+      const { base64, mediaType } = await resizeImageToBase64(file)
+
+      // 写真をStorageに保存
+      const ext = 'jpg'
+      const path = `minutes/${id}/photo_${Date.now()}.${ext}`
+      const blob = await (await fetch(`data:${mediaType};base64,${base64}`)).blob()
+      await supabase.storage.from('project-files').upload(path, blob, { upsert: false, contentType: mediaType })
+      const { data: urlData } = supabase.storage.from('project-files').getPublicUrl(path)
+      setPhotoUrl(urlData.publicUrl)
+      setUploadingPhoto(false)
+
+      // AI読み取り
+      setAnalyzingPhoto(true)
+      const res = await fetch('/api/analyze-minutes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: base64, mediaType }),
+      })
+      if (!res.ok) throw new Error('request failed')
+      const json = await res.json()
+      setForm(f => ({
+        ...f,
+        danger_points: json.danger_points || f.danger_points,
+        cautions: json.cautions || f.cautions,
+        notices: json.notices || f.notices,
+      }))
+    } catch {
+      setPhotoError('読み取りに失敗しました。内容を直接入力してください。')
+    } finally {
+      setUploadingPhoto(false)
+      setAnalyzingPhoto(false)
+    }
+  }
+
   async function save(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
@@ -42,10 +115,14 @@ export default function MinutesPage() {
       danger_points: form.danger_points || null,
       cautions: form.cautions || null,
       notices: form.notices || null,
+      photo_url: photoUrl,
     })
     setSaving(false)
     setSuccess(true)
     setForm({ date: today, danger_points: '', cautions: '', notices: '' })
+    setPhotoUrl(null)
+    setPhotoError(null)
+    if (photoInputRef.current) photoInputRef.current.value = ''
     await load()
     setTimeout(() => { setSuccess(false); setMode('list') }, 1000)
   }
@@ -68,6 +145,10 @@ export default function MinutesPage() {
   async function deleteNote() {
     if (!selected) return
     if (!confirm('この議事録を削除しますか？')) return
+    if (selected.photo_url) {
+      const path = selected.photo_url.split('/project-files/')[1]
+      if (path) await supabase.storage.from('project-files').remove([path])
+    }
     await supabase.from('meeting_notes').delete().eq('id', selected.id)
     await load()
     setMode('list')
@@ -105,7 +186,7 @@ export default function MinutesPage() {
         {notes.map(n => (
           <button key={n.id} onClick={() => openDetail(n)}
             className="bg-white rounded-lg shadow p-4 text-left hover:shadow-md transition w-full">
-            <p className="font-bold text-gray-800">{n.date}</p>
+            <p className="font-bold text-gray-800">{n.date}{n.photo_url && <span className="ml-1 text-sm align-middle">📷</span>}</p>
             <div className="mt-2 flex flex-col gap-1">
               {n.danger_points && (
                 <p className="text-sm text-gray-600">
@@ -135,6 +216,16 @@ export default function MinutesPage() {
   // --- 新規作成 ---
   if (mode === 'new') return (
     <div>
+      {enlarged && (
+        <div className="fixed inset-0 z-50 bg-black/90 flex flex-col" onClick={() => setEnlarged(null)}>
+          <div className="flex justify-end px-4 py-3">
+            <button onClick={() => setEnlarged(null)} className="text-white text-2xl">✕</button>
+          </div>
+          <div className="flex-1 flex items-center justify-center p-4">
+            <img src={enlarged} alt="" className="max-w-full max-h-full object-contain rounded" />
+          </div>
+        </div>
+      )}
       <button onClick={() => setMode('list')} className="text-blue-600 text-sm mb-3 py-1">← 議事録一覧</button>
       <h1 className="text-xl font-bold mb-4">議事録 新規作成</h1>
 
@@ -146,6 +237,43 @@ export default function MinutesPage() {
           <input type="date" className="w-full border rounded px-3 py-3"
             value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
         </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-2">手書きメモ写真（AI読み取り・任意）</label>
+          {photoUrl ? (
+            <div className="relative">
+              <img src={photoUrl} alt="議事録メモ"
+                className="w-full rounded-lg border object-cover max-h-48 cursor-pointer"
+                onClick={() => setEnlarged(photoUrl)} />
+              <button type="button"
+                onClick={() => { setPhotoUrl(null); setPhotoError(null); if (photoInputRef.current) photoInputRef.current.value = '' }}
+                className="absolute top-2 right-2 bg-black/50 text-white rounded-full w-7 h-7 flex items-center justify-center text-sm">✕</button>
+              {analyzingPhoto && (
+                <div className="absolute inset-0 bg-black/40 rounded-lg flex items-center justify-center">
+                  <p className="text-white text-sm font-medium">AI読み取り中...</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <label className={`flex flex-col items-center justify-center w-full border-2 border-dashed rounded-lg py-5 cursor-pointer transition
+              ${uploadingPhoto || analyzingPhoto ? 'border-blue-200 bg-blue-50' : 'border-blue-300 bg-blue-50 hover:bg-blue-100'}`}>
+              {uploadingPhoto ? (
+                <p className="text-sm text-blue-400">アップロード中...</p>
+              ) : analyzingPhoto ? (
+                <p className="text-sm text-blue-600 font-medium">AI読み取り中...</p>
+              ) : (
+                <>
+                  <span className="text-2xl mb-1">📷</span>
+                  <p className="text-sm font-medium text-blue-700">メモを撮影してAI読み取り</p>
+                </>
+              )}
+              <input ref={photoInputRef} type="file" accept="image/*"
+                className="hidden" disabled={uploadingPhoto || analyzingPhoto} onChange={handlePhoto} />
+            </label>
+          )}
+          {photoError && <p className="text-sm text-red-500 mt-1">{photoError}</p>}
+        </div>
+
         <div>
           <label className="block text-sm font-medium mb-1 text-red-600">⚠ 危険箇所</label>
           <textarea
@@ -184,6 +312,16 @@ export default function MinutesPage() {
   // --- 詳細表示 ---
   if (mode === 'detail' && selected) return (
     <div>
+      {enlarged && (
+        <div className="fixed inset-0 z-50 bg-black/90 flex flex-col" onClick={() => setEnlarged(null)}>
+          <div className="flex justify-end px-4 py-3">
+            <button onClick={() => setEnlarged(null)} className="text-white text-2xl">✕</button>
+          </div>
+          <div className="flex-1 flex items-center justify-center p-4">
+            <img src={enlarged} alt="" className="max-w-full max-h-full object-contain rounded" />
+          </div>
+        </div>
+      )}
       <button onClick={() => { setMode('list'); setEditing(false) }} className="text-blue-600 text-sm mb-3 py-1">← 議事録一覧</button>
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-xl font-bold">{selected.date}</h1>
@@ -229,6 +367,14 @@ export default function MinutesPage() {
           </>
         ) : (
           <>
+            {selected.photo_url && (
+              <div>
+                <p className="text-sm font-bold mb-1 text-gray-700">手書きメモ写真</p>
+                <img src={selected.photo_url} alt="議事録メモ"
+                  className="w-full rounded-lg border object-cover max-h-64 cursor-pointer"
+                  onClick={() => setEnlarged(selected.photo_url)} />
+              </div>
+            )}
             <Section label="⚠ 危険箇所" color="text-red-600" value={selected.danger_points} />
             <Section label="注意事項" value={selected.cautions} />
             <Section label="伝達事項" value={selected.notices} />
