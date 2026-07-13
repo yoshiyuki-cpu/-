@@ -19,15 +19,18 @@ export async function POST(req: NextRequest) {
           },
           {
             type: 'text',
-            text: 'このレシートの合計金額を数字のみで答えてください。例：3850。税込合計金額が読み取れない場合は「不明」と答えてください。',
+            text: 'これはガソリンスタンドのレシートです。以下の情報をJSON形式で抽出してください。{"amount": 税込合計金額の数値, "liters": 給油量（リットル）の数値, "fuel_type": "軽油"または"レギュラー"（レシートの油種名から判断。軽油以外のガソリン類（レギュラー・ハイオク等）はすべて"レギュラー"として扱う。判断できない場合はnull）}。読み取れない項目はnullにしてください。JSONのみ返してください。',
           },
         ],
       },
     ],
   })
 
-  const text = (message.content[0] as any).text.trim()
-  const amount = parseInt(text.replace(/[^0-9]/g, ''), 10)
-
-  return NextResponse.json({ amount: isNaN(amount) ? null : amount, raw: text })
+  try {
+    const text = (message.content[0] as any).text.trim()
+    const json = JSON.parse(text.replace(/```json\n?|\n?```/g, '').trim())
+    return NextResponse.json(json)
+  } catch {
+    return NextResponse.json({ amount: null, liters: null, fuel_type: null })
+  }
 }

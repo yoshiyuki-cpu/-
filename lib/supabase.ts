@@ -57,6 +57,7 @@ export type OtherEntry = {
   unit_price: number
   amount: number
   note: string | null
+  fuel_type: string | null
 }
 
 export type ScrapRecord = {

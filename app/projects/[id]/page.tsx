@@ -117,8 +117,14 @@ export default function ProjectDetailPage() {
     })
 
     sortedOther.forEach((e: any) => {
-      const label = e.entry_type === 'fuel' ? '燃料代' : 'リース代'
-      rows.push([e.date, label, '', e.note ?? '', '1', '式', String(e.amount)])
+      const label = e.entry_type === 'fuel' ? `燃料代${e.fuel_type ? `（${e.fuel_type}）` : ''}` : 'リース代'
+      const isFuelWithLiters = e.entry_type === 'fuel' && Number(e.quantity) > 0 && Number(e.quantity) !== 1
+      rows.push([
+        e.date, label, '', e.note ?? '',
+        isFuelWithLiters ? String(e.quantity) : '1',
+        isFuelWithLiters ? 'リットル' : '式',
+        String(e.amount),
+      ])
     })
 
     scrapRecords.forEach((r) => {
@@ -425,6 +431,7 @@ export default function ProjectDetailPage() {
               <span className="font-medium">{e.date}</span>
               <span className="text-gray-500 mx-1">·</span>
               <span>{otherLabel[e.entry_type]}</span>
+              {e.fuel_type && <span className="text-gray-500 ml-1">（{e.fuel_type}{Number(e.quantity) > 0 && Number(e.quantity) !== 1 ? ` ${e.quantity}L` : ''}）</span>}
               {e.note && <span className="text-gray-500 ml-1">({e.note})</span>}
             </div>
             <div className="flex items-center gap-3 shrink-0 ml-2">

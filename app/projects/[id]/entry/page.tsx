@@ -53,7 +53,7 @@ export default function EntryPage() {
   const [wasteForm, setWasteForm] = useState({ date: today, site_id: '', waste_type_id: '', quantity: '' })
   const [laborDate, setLaborDate] = useState(today)
   const [workerDayType, setWorkerDayType] = useState<Record<number, DayType>>({})
-  const [otherForm, setOtherForm] = useState({ date: today, unit_price: '', note: '' })
+  const [otherForm, setOtherForm] = useState({ date: today, unit_price: '', note: '', quantity: '', fuel_type: '' as '' | '軽油' | 'レギュラー' })
 
   useEffect(() => { loadMaster() }, [])
 
@@ -135,14 +135,15 @@ export default function EntryPage() {
       project_id: Number(id),
       entry_type: tab,
       date: otherForm.date,
-      quantity: 1,
+      quantity: tab === 'fuel' && otherForm.quantity ? Number(otherForm.quantity) : 1,
       unit_price: amount,
       amount,
       note: otherForm.note || null,
+      fuel_type: tab === 'fuel' ? (otherForm.fuel_type || null) : null,
     })
     setSaving(false)
     setSuccess(true)
-    setOtherForm({ date: otherForm.date, unit_price: '', note: '' })
+    setOtherForm({ date: otherForm.date, unit_price: '', note: '', quantity: '', fuel_type: '' })
     setTimeout(() => setSuccess(false), 2000)
   }
 
@@ -275,44 +276,69 @@ export default function EntryPage() {
               onChange={e => setOtherForm({ ...otherForm, date: e.target.value })} />
           </div>
           {tab === 'fuel' && (
-            <div>
-              <label className="block text-sm font-medium mb-1">レシート写真から読み取る（任意）</label>
-              <label className="flex items-center justify-center w-full border-2 border-dashed border-gray-300 rounded-lg py-4 cursor-pointer hover:border-blue-400 bg-gray-50">
-                <div className="text-center">
-                  <span className="text-2xl">📷</span>
-                  <p className="text-sm text-gray-500 mt-1">タップして写真を選択</p>
+            <>
+              <div>
+                <label className="block text-sm font-medium mb-1">種類</label>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setOtherForm({ ...otherForm, fuel_type: '軽油' })}
+                    className={`flex-1 py-3 rounded border text-sm font-medium ${otherForm.fuel_type === '軽油' ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600'}`}>
+                    軽油
+                  </button>
+                  <button type="button" onClick={() => setOtherForm({ ...otherForm, fuel_type: 'レギュラー' })}
+                    className={`flex-1 py-3 rounded border text-sm font-medium ${otherForm.fuel_type === 'レギュラー' ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600'}`}>
+                    レギュラー
+                  </button>
                 </div>
-                <input type="file" accept="image/*" className="hidden"
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0]
-                    if (!file) return
-                    setSaving(true)
-                    setReceiptError(null)
-                    try {
-                      const { base64, mediaType } = await resizeImageToBase64(file)
-                      const res = await fetch('/api/analyze-receipt', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ imageBase64: base64, mediaType }),
-                      })
-                      if (!res.ok) throw new Error('request failed')
-                      const data = await res.json()
-                      if (data.amount) {
-                        setOtherForm(f => ({ ...f, unit_price: String(data.amount) }))
-                      } else {
-                        setReceiptError('金額を読み取れませんでした。金額を直接入力してください。')
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">数量（リットル）</label>
+                <input type="number" step="0.01" inputMode="decimal" className="w-full border rounded px-3 py-3 text-base" value={otherForm.quantity}
+                  onChange={e => setOtherForm({ ...otherForm, quantity: e.target.value })} placeholder="0" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">レシート写真から読み取る（任意）</label>
+                <label className="flex items-center justify-center w-full border-2 border-dashed border-gray-300 rounded-lg py-4 cursor-pointer hover:border-blue-400 bg-gray-50">
+                  <div className="text-center">
+                    <span className="text-2xl">📷</span>
+                    <p className="text-sm text-gray-500 mt-1">タップして写真を選択</p>
+                  </div>
+                  <input type="file" accept="image/*" className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      setSaving(true)
+                      setReceiptError(null)
+                      try {
+                        const { base64, mediaType } = await resizeImageToBase64(file)
+                        const res = await fetch('/api/analyze-receipt', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ imageBase64: base64, mediaType }),
+                        })
+                        if (!res.ok) throw new Error('request failed')
+                        const data = await res.json()
+                        if (data.amount) {
+                          setOtherForm(f => ({
+                            ...f,
+                            unit_price: String(data.amount),
+                            quantity: data.liters ? String(data.liters) : f.quantity,
+                            fuel_type: data.fuel_type === '軽油' || data.fuel_type === 'レギュラー' ? data.fuel_type : f.fuel_type,
+                          }))
+                        } else {
+                          setReceiptError('金額を読み取れませんでした。金額を直接入力してください。')
+                        }
+                      } catch {
+                        setReceiptError('読み取りに失敗しました。金額を直接入力してください。')
+                      } finally {
+                        setSaving(false)
+                        e.target.value = ''
                       }
-                    } catch {
-                      setReceiptError('読み取りに失敗しました。金額を直接入力してください。')
-                    } finally {
-                      setSaving(false)
-                      e.target.value = ''
-                    }
-                  }} />
-              </label>
-              {saving && <p className="text-sm text-blue-500">読み取り中...</p>}
-              {receiptError && <p className="text-sm text-red-500">{receiptError}</p>}
-            </div>
+                    }} />
+                </label>
+                {saving && <p className="text-sm text-blue-500">読み取り中...</p>}
+                {receiptError && <p className="text-sm text-red-500">{receiptError}</p>}
+              </div>
+            </>
           )}
           <div>
             <label className="block text-sm font-medium mb-1">金額（円）</label>
