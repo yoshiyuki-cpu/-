@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
-import { supabase, MeetingNote } from '@/lib/supabase'
+import { supabase, MeetingNote, MeetingNotePhoto } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
 
 type Mode = 'list' | 'new' | 'detail'
@@ -58,6 +58,11 @@ export default function MinutesPage() {
   const [analyzingVoice, setAnalyzingVoice] = useState(false)
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const recognitionRef = useRef<any>(null)
+  const [dailyPhotos, setDailyPhotos] = useState<string[]>([])
+  const [uploadingDaily, setUploadingDaily] = useState(false)
+  const dailyPhotoInputRef = useRef<HTMLInputElement>(null)
+  const [notePhotos, setNotePhotos] = useState<MeetingNotePhoto[]>([])
+  const [uploadingNotePhoto, setUploadingNotePhoto] = useState(false)
 
   useEffect(() => { load() }, [id])
 
@@ -131,6 +136,61 @@ export default function MinutesPage() {
     setLoading(false)
   }
 
+  async function loadNotePhotos(noteId: number) {
+    const { data } = await supabase
+      .from('meeting_note_photos')
+      .select('*')
+      .eq('meeting_note_id', noteId)
+      .order('created_at')
+    setNotePhotos(data ?? [])
+  }
+
+  async function uploadDailyFile(file: File) {
+    const ext = file.name.split('.').pop() || 'jpg'
+    const path = `minutes/${id}/daily_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`
+    await supabase.storage.from('project-files').upload(path, file, { upsert: false })
+    const { data } = supabase.storage.from('project-files').getPublicUrl(path)
+    return data.publicUrl
+  }
+
+  async function handleDailyPhotos(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? [])
+    if (files.length === 0) return
+    setUploadingDaily(true)
+    const urls: string[] = []
+    for (const file of files) urls.push(await uploadDailyFile(file))
+    setDailyPhotos(prev => [...prev, ...urls])
+    setUploadingDaily(false)
+    if (dailyPhotoInputRef.current) dailyPhotoInputRef.current.value = ''
+  }
+
+  async function removeDailyPhoto(url: string) {
+    setDailyPhotos(prev => prev.filter(u => u !== url))
+    const path = url.split('/project-files/')[1]
+    if (path) await supabase.storage.from('project-files').remove([path])
+  }
+
+  async function handleAddNotePhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? [])
+    if (files.length === 0 || !selected) return
+    setUploadingNotePhoto(true)
+    for (const file of files) {
+      const url = await uploadDailyFile(file)
+      await supabase.from('meeting_note_photos').insert({ meeting_note_id: selected.id, photo_url: url })
+    }
+    setUploadingNotePhoto(false)
+    await loadNotePhotos(selected.id)
+    e.target.value = ''
+  }
+
+  async function deleteNotePhoto(photo: MeetingNotePhoto) {
+    if (!confirm('この写真を削除しますか？')) return
+    const path = photo.photo_url.split('/project-files/')[1]
+    if (path) await supabase.storage.from('project-files').remove([path])
+    await supabase.from('meeting_note_photos').delete().eq('id', photo.id)
+    if (selected) await loadNotePhotos(selected.id)
+  }
+
   async function handlePhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -174,14 +234,19 @@ export default function MinutesPage() {
   async function save(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
-    await supabase.from('meeting_notes').insert({
+    const { data: inserted } = await supabase.from('meeting_notes').insert({
       project_id: Number(id),
       date: form.date,
       danger_points: form.danger_points || null,
       cautions: form.cautions || null,
       notices: form.notices || null,
       photo_url: photoUrl,
-    })
+    }).select('id').single()
+    if (inserted && dailyPhotos.length > 0) {
+      await supabase.from('meeting_note_photos').insert(
+        dailyPhotos.map(url => ({ meeting_note_id: inserted.id, photo_url: url }))
+      )
+    }
     setSaving(false)
     setSuccess(true)
     setForm({ date: today, danger_points: '', cautions: '', notices: '' })
@@ -189,6 +254,7 @@ export default function MinutesPage() {
     setPhotoError(null)
     setVoiceText('')
     setVoiceError(null)
+    setDailyPhotos([])
     if (photoInputRef.current) photoInputRef.current.value = ''
     await load()
     setTimeout(() => { setSuccess(false); setMode('list') }, 1000)
@@ -216,10 +282,15 @@ export default function MinutesPage() {
       const path = selected.photo_url.split('/project-files/')[1]
       if (path) await supabase.storage.from('project-files').remove([path])
     }
+    for (const p of notePhotos) {
+      const path = p.photo_url.split('/project-files/')[1]
+      if (path) await supabase.storage.from('project-files').remove([path])
+    }
     await supabase.from('meeting_notes').delete().eq('id', selected.id)
     await load()
     setMode('list')
     setSelected(null)
+    setNotePhotos([])
   }
 
   function openDetail(note: MeetingNote) {
@@ -231,6 +302,7 @@ export default function MinutesPage() {
     })
     setEditing(false)
     setMode('detail')
+    loadNotePhotos(note.id)
   }
 
   // --- リスト表示 ---
@@ -378,6 +450,35 @@ export default function MinutesPage() {
         </div>
 
         <div>
+          <label className="block text-sm font-medium mb-2">📷 その日の写真（複数可・任意）</label>
+          {dailyPhotos.length > 0 && (
+            <div className="grid grid-cols-3 gap-2 mb-2">
+              {dailyPhotos.map(url => (
+                <div key={url} className="relative">
+                  <img src={url} alt="" className="w-full aspect-square object-cover rounded border cursor-pointer"
+                    onClick={() => setEnlarged(url)} />
+                  <button type="button" onClick={() => removeDailyPhoto(url)}
+                    className="absolute top-1 right-1 bg-black/50 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs">✕</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <label className={`flex items-center justify-center w-full border-2 border-dashed rounded-lg py-4 cursor-pointer transition
+            ${uploadingDaily ? 'border-gray-200 bg-gray-50' : 'border-blue-300 bg-blue-50 hover:bg-blue-100'}`}>
+            {uploadingDaily ? (
+              <p className="text-sm text-gray-500">アップロード中...</p>
+            ) : (
+              <div className="text-center">
+                <span className="text-2xl">📷</span>
+                <p className="text-sm font-medium text-blue-700 mt-1">タップして写真を追加</p>
+              </div>
+            )}
+            <input ref={dailyPhotoInputRef} type="file" accept="image/*" multiple
+              className="hidden" disabled={uploadingDaily} onChange={handleDailyPhotos} />
+          </label>
+        </div>
+
+        <div>
           <label className="block text-sm font-medium mb-1 text-red-600">⚠ 危険箇所</label>
           <textarea
             className="w-full border rounded px-3 py-3 text-sm resize-none" rows={3}
@@ -483,6 +584,33 @@ export default function MinutesPage() {
             <Section label="伝達事項" value={selected.notices} />
           </>
         )}
+      </div>
+
+      <div className="bg-white rounded-lg shadow p-4 mt-4">
+        <p className="text-sm font-bold mb-2 text-gray-700">📷 その日の写真</p>
+        {notePhotos.length === 0 && <p className="text-sm text-gray-400 mb-2">写真がありません</p>}
+        {notePhotos.length > 0 && (
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            {notePhotos.map(p => (
+              <div key={p.id} className="relative">
+                <img src={p.photo_url} alt="" className="w-full aspect-square object-cover rounded border cursor-pointer"
+                  onClick={() => setEnlarged(p.photo_url)} />
+                <button onClick={() => deleteNotePhoto(p)}
+                  className="absolute top-1 right-1 bg-black/50 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs">✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+        <label className={`flex items-center justify-center w-full border-2 border-dashed rounded-lg py-3 cursor-pointer transition
+          ${uploadingNotePhoto ? 'border-gray-200 bg-gray-50' : 'border-blue-300 bg-blue-50 hover:bg-blue-100'}`}>
+          {uploadingNotePhoto ? (
+            <p className="text-sm text-gray-500">アップロード中...</p>
+          ) : (
+            <p className="text-sm font-medium text-blue-700">＋ 写真を追加</p>
+          )}
+          <input type="file" accept="image/*" multiple
+            className="hidden" disabled={uploadingNotePhoto} onChange={handleAddNotePhoto} />
+        </label>
       </div>
     </div>
   )

@@ -136,6 +136,13 @@ export type MeetingNote = {
   created_at: string
 }
 
+export type MeetingNotePhoto = {
+  id: number
+  meeting_note_id: number
+  photo_url: string
+  created_at: string
+}
+
 export type KyPhoto = {
   id: number
   project_id: number
