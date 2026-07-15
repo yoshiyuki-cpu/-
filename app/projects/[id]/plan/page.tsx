@@ -30,6 +30,7 @@ export default function PlanPage() {
     budget_labor: '',
     budget_fuel: '',
     budget_lease: '',
+    budget_expense: '',
     budget_scrap_revenue: '',
   })
 
@@ -44,7 +45,7 @@ export default function PlanPage() {
   const [laborForm, setLaborForm] = useState({ date: today, target_count: '' })
 
   // 実績集計（現場全体）
-  const [actuals, setActuals] = useState({ waste_cost: 0, labor: 0, fuel: 0, lease: 0, scrap: 0 })
+  const [actuals, setActuals] = useState({ waste_cost: 0, labor: 0, fuel: 0, lease: 0, expense: 0, scrap: 0 })
 
   useEffect(() => { load() }, [id])
 
@@ -76,6 +77,7 @@ export default function PlanPage() {
         budget_labor: p.budget_labor ? String(p.budget_labor) : '',
         budget_fuel: p.budget_fuel ? String(p.budget_fuel) : '',
         budget_lease: p.budget_lease ? String(p.budget_lease) : '',
+        budget_expense: p.budget_expense ? String(p.budget_expense) : '',
         budget_scrap_revenue: p.budget_scrap_revenue ? String(p.budget_scrap_revenue) : '',
       })
     }
@@ -83,7 +85,7 @@ export default function PlanPage() {
     setLaborTargets(lt ?? [])
 
     // 実績集計
-    let waste_cost = 0, scrap = 0, labor = 0, fuel = 0, lease = 0
+    let waste_cost = 0, scrap = 0, labor = 0, fuel = 0, lease = 0, expense = 0
     we?.forEach((e: any) => {
       if (e.waste_types?.entry_type === 'cost') waste_cost += Number(e.amount)
       else scrap += Number(e.amount)
@@ -93,9 +95,10 @@ export default function PlanPage() {
       if (e.entry_type === 'labor') labor += Number(e.amount)
       else if (e.entry_type === 'fuel') fuel += Number(e.amount)
       else if (e.entry_type === 'lease') lease += Number(e.amount)
+      else if (e.entry_type === 'expense') expense += Number(e.amount)
     })
     le?.forEach((e: any) => { labor += Number(e.amount) })
-    setActuals({ waste_cost, labor, fuel, lease, scrap })
+    setActuals({ waste_cost, labor, fuel, lease, expense, scrap })
 
     // 日別実績人工数（半日は0.5人でカウント）
     const byDate: Record<string, number> = {}
@@ -115,6 +118,7 @@ export default function PlanPage() {
       budget_labor: Number(budgetForm.budget_labor) || null,
       budget_fuel: Number(budgetForm.budget_fuel) || null,
       budget_lease: Number(budgetForm.budget_lease) || null,
+      budget_expense: Number(budgetForm.budget_expense) || null,
       budget_scrap_revenue: Number(budgetForm.budget_scrap_revenue) || null,
     }).eq('id', id)
     setSaving(false)
@@ -181,8 +185,8 @@ export default function PlanPage() {
   if (loading) return <p className="text-center py-10 text-gray-500">読み込み中...</p>
   if (!project) return null
 
-  const totalBudgetCost = (project.budget_waste_cost ?? 0) + (project.budget_labor ?? 0) + (project.budget_fuel ?? 0) + (project.budget_lease ?? 0)
-  const totalActualCost = actuals.waste_cost + actuals.labor + actuals.fuel + actuals.lease
+  const totalBudgetCost = (project.budget_waste_cost ?? 0) + (project.budget_labor ?? 0) + (project.budget_fuel ?? 0) + (project.budget_lease ?? 0) + (project.budget_expense ?? 0)
+  const totalActualCost = actuals.waste_cost + actuals.labor + actuals.fuel + actuals.lease + actuals.expense
   const totalLaborTarget = laborTargets.reduce((s, t) => s + Number(t.target_count), 0)
   const totalLaborActual = Object.values(laborActuals).reduce((s, v) => s + v, 0)
 
@@ -229,6 +233,7 @@ export default function PlanPage() {
               { key: 'budget_labor', label: '人工費', color: '' },
               { key: 'budget_fuel', label: '燃料代', color: '' },
               { key: 'budget_lease', label: 'リース代', color: '' },
+              { key: 'budget_expense', label: '経費', color: '' },
               { key: 'budget_scrap_revenue', label: 'スクラップ収益', color: 'text-blue-600' },
             ].map(({ key, label, color }) => (
               <div key={key} className="flex items-center gap-3">
@@ -271,6 +276,7 @@ export default function PlanPage() {
                     { label: '人工費', budget: project.budget_labor ?? 0, actual: actuals.labor, rev: false },
                     { label: '燃料代', budget: project.budget_fuel ?? 0, actual: actuals.fuel, rev: false },
                     { label: 'リース代', budget: project.budget_lease ?? 0, actual: actuals.lease, rev: false },
+                    { label: '経費', budget: project.budget_expense ?? 0, actual: actuals.expense, rev: false },
                     { label: 'スクラップ収益', budget: project.budget_scrap_revenue ?? 0, actual: actuals.scrap, rev: true },
                   ].map(({ label, budget, actual, rev }) => {
                     const diff = rev ? actual - budget : budget - actual

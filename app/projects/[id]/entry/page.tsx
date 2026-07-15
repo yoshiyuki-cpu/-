@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { supabase, DisposalSite, WasteType } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
 
-type Tab = 'waste' | 'labor' | 'fuel' | 'lease'
+type Tab = 'waste' | 'labor' | 'fuel' | 'lease' | 'expense'
 type Worker = { id: number; name: string; company_name: string | null }
 
 const LABOR_UNIT_PRICE_TAX_EXCL = 15000
@@ -159,11 +159,12 @@ export default function EntryPage() {
         <div className="bg-green-100 text-green-700 rounded px-3 py-2 mb-3 text-sm">保存しました ✓</div>
       )}
 
-      <div className="flex mb-4 border-b">
+      <div className="flex mb-4 border-b overflow-x-auto">
         <button className={tabClass('waste')} onClick={() => setTab('waste')}>廃材</button>
         <button className={tabClass('labor')} onClick={() => setTab('labor')}>人工</button>
         <button className={tabClass('fuel')} onClick={() => setTab('fuel')}>燃料代</button>
         <button className={tabClass('lease')} onClick={() => setTab('lease')}>リース代</button>
+        <button className={tabClass('expense')} onClick={() => setTab('expense')}>経費</button>
       </div>
 
       {tab === 'waste' && (
@@ -268,7 +269,7 @@ export default function EntryPage() {
         </form>
       )}
 
-      {(tab === 'fuel' || tab === 'lease') && (
+      {(tab === 'fuel' || tab === 'lease' || tab === 'expense') && (
         <form onSubmit={saveOther} className="bg-white rounded-lg shadow p-4 flex flex-col gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">日付</label>
@@ -339,6 +340,46 @@ export default function EntryPage() {
                 {receiptError && <p className="text-sm text-red-500">{receiptError}</p>}
               </div>
             </>
+          )}
+          {tab === 'expense' && (
+            <div>
+              <label className="block text-sm font-medium mb-1">レシート写真から読み取る（任意）</label>
+              <label className="flex items-center justify-center w-full border-2 border-dashed border-gray-300 rounded-lg py-4 cursor-pointer hover:border-blue-400 bg-gray-50">
+                <div className="text-center">
+                  <span className="text-2xl">📷</span>
+                  <p className="text-sm text-gray-500 mt-1">タップして写真を選択（手書きの場合は直接金額を入力してください）</p>
+                </div>
+                <input type="file" accept="image/*" className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0]
+                    if (!file) return
+                    setSaving(true)
+                    setReceiptError(null)
+                    try {
+                      const { base64, mediaType } = await resizeImageToBase64(file)
+                      const res = await fetch('/api/analyze-expense', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ imageBase64: base64, mediaType }),
+                      })
+                      if (!res.ok) throw new Error('request failed')
+                      const data = await res.json()
+                      if (data.amount) {
+                        setOtherForm(f => ({ ...f, unit_price: String(data.amount) }))
+                      } else {
+                        setReceiptError('金額を読み取れませんでした。金額を直接入力してください。')
+                      }
+                    } catch {
+                      setReceiptError('読み取りに失敗しました。金額を直接入力してください。')
+                    } finally {
+                      setSaving(false)
+                      e.target.value = ''
+                    }
+                  }} />
+              </label>
+              {saving && <p className="text-sm text-blue-500">読み取り中...</p>}
+              {receiptError && <p className="text-sm text-red-500">{receiptError}</p>}
+            </div>
           )}
           <div>
             <label className="block text-sm font-medium mb-1">金額（円）</label>

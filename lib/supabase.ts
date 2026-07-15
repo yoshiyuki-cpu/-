@@ -34,6 +34,7 @@ export type Project = {
   budget_fuel: number | null
   budget_lease: number | null
   budget_scrap_revenue: number | null
+  budget_expense: number | null
   process_notes: string | null
   created_at: string
 }
@@ -51,7 +52,7 @@ export type WasteEntry = {
 export type OtherEntry = {
   id: number
   project_id: number
-  entry_type: 'labor' | 'fuel' | 'lease'
+  entry_type: 'labor' | 'fuel' | 'lease' | 'expense'
   date: string
   quantity: number
   unit_price: number

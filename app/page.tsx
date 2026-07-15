@@ -9,6 +9,7 @@ type ProjectWithTotals = Project & {
   labor_amount: number
   fuel_amount: number
   lease_amount: number
+  expense_amount: number
 }
 
 type StatusFilter = 'all' | 'active' | 'completed'
@@ -44,15 +45,16 @@ export default function HomePage() {
       })
       scrapRecords?.forEach((r: any) => { scrap_revenue += Number(r.amount) })
 
-      let labor_amount = 0, fuel_amount = 0, lease_amount = 0
+      let labor_amount = 0, fuel_amount = 0, lease_amount = 0, expense_amount = 0
       otherEntries?.forEach((e: any) => {
         if (e.entry_type === 'labor') labor_amount += Number(e.amount)
         else if (e.entry_type === 'fuel') fuel_amount += Number(e.amount)
         else if (e.entry_type === 'lease') lease_amount += Number(e.amount)
+        else if (e.entry_type === 'expense') expense_amount += Number(e.amount)
       })
       laborEntries?.forEach((e: any) => { labor_amount += Number(e.amount) })
 
-      return { ...p, waste_cost, scrap_revenue, labor_amount, fuel_amount, lease_amount }
+      return { ...p, waste_cost, scrap_revenue, labor_amount, fuel_amount, lease_amount, expense_amount }
     }))
 
     setProjects(withTotals)
@@ -115,7 +117,7 @@ export default function HomePage() {
 
       <div className="flex flex-col gap-3">
         {filtered.map((p) => {
-          const totalCost = p.waste_cost + p.labor_amount + p.fuel_amount + p.lease_amount
+          const totalCost = p.waste_cost + p.labor_amount + p.fuel_amount + p.lease_amount + p.expense_amount
           const profit = p.scrap_revenue - totalCost
           const isProfit = profit >= 0
           return (
@@ -137,6 +139,7 @@ export default function HomePage() {
                   <div className="text-gray-600">人工費</div><div className="text-right">{fmt(p.labor_amount)}</div>
                   <div className="text-gray-600">燃料代</div><div className="text-right">{fmt(p.fuel_amount)}</div>
                   <div className="text-gray-600">リース代</div><div className="text-right">{fmt(p.lease_amount)}</div>
+                  <div className="text-gray-600">経費</div><div className="text-right">{fmt(p.expense_amount)}</div>
                   <div className="font-bold border-t pt-1 mt-1">支出合計</div>
                   <div className="text-right font-bold border-t pt-1 mt-1 text-red-700">{fmt(totalCost)}</div>
                 </div>

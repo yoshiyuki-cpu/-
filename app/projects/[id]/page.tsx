@@ -117,7 +117,9 @@ export default function ProjectDetailPage() {
     })
 
     sortedOther.forEach((e: any) => {
-      const label = e.entry_type === 'fuel' ? `燃料代${e.fuel_type ? `（${e.fuel_type}）` : ''}` : 'リース代'
+      const label = e.entry_type === 'fuel' ? `燃料代${e.fuel_type ? `（${e.fuel_type}）` : ''}`
+        : e.entry_type === 'expense' ? '経費'
+        : 'リース代'
       const isFuelWithLiters = e.entry_type === 'fuel' && Number(e.quantity) > 0 && Number(e.quantity) !== 1
       rows.push([
         e.date, label, '', e.note ?? '',
@@ -156,10 +158,11 @@ export default function ProjectDetailPage() {
   const laborAmt = laborEntries.reduce((s, e) => s + Number(e.amount), 0) + otherEntries.filter(e => e.entry_type === 'labor').reduce((s, e) => s + Number(e.amount), 0)
   const fuelAmt = otherEntries.filter(e => e.entry_type === 'fuel').reduce((s, e) => s + Number(e.amount), 0)
   const leaseAmt = otherEntries.filter(e => e.entry_type === 'lease').reduce((s, e) => s + Number(e.amount), 0)
-  const totalCost = wasteCost + laborAmt + fuelAmt + leaseAmt
+  const expenseAmt = otherEntries.filter(e => e.entry_type === 'expense').reduce((s, e) => s + Number(e.amount), 0)
+  const totalCost = wasteCost + laborAmt + fuelAmt + leaseAmt + expenseAmt
   const profit = scrapRevenue - totalCost
   const isProfit = profit >= 0
-  const maxBar = Math.max(wasteCost, laborAmt, fuelAmt, leaseAmt, scrapRevenue, 1)
+  const maxBar = Math.max(wasteCost, laborAmt, fuelAmt, leaseAmt, expenseAmt, scrapRevenue, 1)
 
   const sortFn = (a: any, b: any) =>
     sortDir === 'desc' ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date)
@@ -168,7 +171,7 @@ export default function ProjectDetailPage() {
   const sortedLabor = [...laborEntries].sort(sortFn)
   const sortedOther = [...otherEntries].sort(sortFn)
 
-  const otherLabel: Record<string, string> = { labor: '人工', fuel: '燃料代', lease: 'リース代' }
+  const otherLabel: Record<string, string> = { labor: '人工', fuel: '燃料代', lease: 'リース代', expense: '経費' }
 
   return (
     <div>
@@ -334,6 +337,7 @@ export default function ProjectDetailPage() {
           <div className="text-gray-600">人工費</div><div className="text-right">{fmt(laborAmt)}</div>
           <div className="text-gray-600">燃料代</div><div className="text-right">{fmt(fuelAmt)}</div>
           <div className="text-gray-600">リース代</div><div className="text-right">{fmt(leaseAmt)}</div>
+          <div className="text-gray-600">経費</div><div className="text-right">{fmt(expenseAmt)}</div>
           <div className="font-bold border-t pt-1 mt-1">支出合計</div>
           <div className="text-right font-bold border-t pt-1 mt-1 text-red-700">{fmt(totalCost)}</div>
         </div>
@@ -355,6 +359,7 @@ export default function ProjectDetailPage() {
             <CostBar label="人工費" amount={laborAmt} max={maxBar} color="bg-orange-400" />
             <CostBar label="燃料代" amount={fuelAmt} max={maxBar} color="bg-yellow-400" />
             <CostBar label="リース代" amount={leaseAmt} max={maxBar} color="bg-purple-400" />
+            <CostBar label="経費" amount={expenseAmt} max={maxBar} color="bg-gray-400" />
           </div>
         )}
       </div>
