@@ -59,6 +59,41 @@ export type OtherEntry = {
   amount: number
   note: string | null
   fuel_type: string | null
+  vehicle_id: number | null
+  vehicles?: Vehicle
+}
+
+export type Vehicle = {
+  id: number
+  name: string
+  category: 'rental' | 'owned'
+  default_price: number | null
+  unit: string
+  note: string | null
+  created_at: string
+}
+
+export type Tool = {
+  id: number
+  name: string
+  total_quantity: number
+  broken_quantity: number
+  unit: string
+  note: string | null
+  created_at: string
+}
+
+export type ToolUsage = {
+  id: number
+  project_id: number
+  tool_id: number
+  quantity: number
+  checked_out_at: string
+  returned_at: string | null
+  note: string | null
+  created_at: string
+  tools?: Tool
+  projects?: Project
 }
 
 export type ScrapRecord = {

@@ -1,19 +1,23 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { supabase, DisposalSite, WasteType, CompanySettings } from '@/lib/supabase'
+import { supabase, DisposalSite, WasteType, CompanySettings, Vehicle } from '@/lib/supabase'
+import Link from 'next/link'
 
 type Worker = { id: number; name: string; company_name: string | null }
 
 export default function MasterPage() {
-  const [tab, setTab] = useState<'disposal' | 'worker' | 'company'>('disposal')
+  const [tab, setTab] = useState<'disposal' | 'worker' | 'vehicle' | 'company'>('disposal')
   const [sites, setSites] = useState<DisposalSite[]>([])
   const [wasteTypes, setWasteTypes] = useState<(WasteType & { disposal_sites?: DisposalSite })[]>([])
   const [workers, setWorkers] = useState<Worker[]>([])
+  const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [selectedSiteId, setSelectedSiteId] = useState<string>('')
   const [newSiteName, setNewSiteName] = useState('')
   const [newWaste, setNewWaste] = useState({ name: '', unit: 'kg', unit_price: '', entry_type: 'cost' })
   const [editingPrice, setEditingPrice] = useState<{ id: number; price: string } | null>(null)
   const [newWorker, setNewWorker] = useState({ name: '', company_name: '' })
+  const [newVehicle, setNewVehicle] = useState({ name: '', category: 'rental' as 'rental' | 'owned', default_price: '', unit: '日' })
+  const [editingVehiclePrice, setEditingVehiclePrice] = useState<{ id: number; price: string } | null>(null)
   const [company, setCompany] = useState<CompanySettings | null>(null)
   const [savingCompany, setSavingCompany] = useState(false)
   const [uploadingStamp, setUploadingStamp] = useState(false)
@@ -21,15 +25,17 @@ export default function MasterPage() {
   useEffect(() => { loadAll() }, [])
 
   async function loadAll() {
-    const [{ data: s }, { data: w }, { data: wk }, { data: c }] = await Promise.all([
+    const [{ data: s }, { data: w }, { data: wk }, { data: v }, { data: c }] = await Promise.all([
       supabase.from('disposal_sites').select('*').order('name'),
       supabase.from('waste_types').select('*, disposal_sites(name)').order('name'),
       supabase.from('workers').select('*').order('name'),
+      supabase.from('vehicles').select('*').order('category').order('name'),
       supabase.from('company_settings').select('*').eq('id', 1).single(),
     ])
     setSites(s ?? [])
     setWasteTypes((w as any) ?? [])
     setWorkers(wk ?? [])
+    setVehicles(v ?? [])
     setCompany(c)
   }
 
@@ -129,6 +135,34 @@ export default function MasterPage() {
     loadAll()
   }
 
+  async function addVehicle() {
+    if (!newVehicle.name) return
+    await supabase.from('vehicles').insert({
+      name: newVehicle.name,
+      category: newVehicle.category,
+      default_price: newVehicle.default_price ? Number(newVehicle.default_price) : null,
+      unit: newVehicle.unit || '日',
+    })
+    setNewVehicle({ name: '', category: 'rental', default_price: '', unit: '日' })
+    loadAll()
+  }
+
+  async function updateVehiclePrice(id: number, price: string) {
+    await supabase.from('vehicles').update({ default_price: price ? Number(price) : null }).eq('id', id)
+    setEditingVehiclePrice(null)
+    loadAll()
+  }
+
+  async function deleteVehicle(id: number) {
+    if (!confirm('この車両・重機を削除しますか？')) return
+    const { error } = await supabase.from('vehicles').delete().eq('id', id)
+    if (error) {
+      alert('この車両・重機は使用実績（車両代記録）があるため削除できません。')
+      return
+    }
+    loadAll()
+  }
+
   const filteredWaste = selectedSiteId
     ? wasteTypes.filter(w => String(w.disposal_site_id) === selectedSiteId)
     : wasteTypes
@@ -138,11 +172,15 @@ export default function MasterPage() {
 
   return (
     <div>
-      <h1 className="text-xl font-bold mb-4">マスタ管理</h1>
+      <div className="flex justify-between items-center mb-4">
+        <h1 className="text-xl font-bold">マスタ管理</h1>
+        <Link href="/tools" className="text-sm text-blue-600 border rounded-full px-3 py-1.5">🧰 置き場道具管理</Link>
+      </div>
 
-      <div className="flex mb-4 border-b">
+      <div className="flex mb-4 border-b overflow-x-auto">
         <button className={tabClass('disposal')} onClick={() => setTab('disposal')}>処分場・廃材</button>
         <button className={tabClass('worker')} onClick={() => setTab('worker')}>作業員</button>
+        <button className={tabClass('vehicle')} onClick={() => setTab('vehicle')}>車両・重機</button>
         <button className={tabClass('company')} onClick={() => setTab('company')}>会社情報</button>
       </div>
 
@@ -264,6 +302,73 @@ export default function MasterPage() {
               </div>
             ))}
           </div>
+        </section>
+      )}
+
+      {tab === 'vehicle' && (
+        <section className="bg-white rounded-lg shadow p-4">
+          <h2 className="font-bold mb-3 text-gray-700">車両・重機</h2>
+          <p className="text-xs text-gray-500 mb-3">
+            単価を設定すると入力画面で自動入力されますが、その場での金額変更もできます。月極リースなど金額が変動する場合は単価を空欄のままにできます。
+          </p>
+          <div className="border rounded p-3 mb-3 bg-gray-50">
+            <p className="text-sm font-medium mb-2">新規車両・重機を追加</p>
+            <div className="flex flex-col gap-2">
+              <input className="border rounded px-3 py-2 text-sm" value={newVehicle.name}
+                onChange={e => setNewVehicle({ ...newVehicle, name: e.target.value })} placeholder="車両・重機名" />
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setNewVehicle({ ...newVehicle, category: 'rental' })}
+                  className={`flex-1 py-2 rounded border text-sm font-medium ${newVehicle.category === 'rental' ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600'}`}>
+                  リース
+                </button>
+                <button type="button" onClick={() => setNewVehicle({ ...newVehicle, category: 'owned' })}
+                  className={`flex-1 py-2 rounded border text-sm font-medium ${newVehicle.category === 'owned' ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600'}`}>
+                  自社
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <input type="number" inputMode="decimal" step="0.01" className="flex-1 border rounded px-3 py-1 text-sm" value={newVehicle.default_price}
+                  onChange={e => setNewVehicle({ ...newVehicle, default_price: e.target.value })} placeholder="基本単価（円・任意）" />
+                <input className="w-20 border rounded px-3 py-1 text-sm" value={newVehicle.unit}
+                  onChange={e => setNewVehicle({ ...newVehicle, unit: e.target.value })} placeholder="単位" />
+              </div>
+              <button onClick={addVehicle} className="bg-blue-600 text-white py-2 rounded text-sm">追加</button>
+            </div>
+          </div>
+
+          {(['rental', 'owned'] as const).map(cat => (
+            <div key={cat} className="mb-3">
+              <p className="text-xs font-semibold text-gray-500 mb-1">{cat === 'rental' ? 'リース' : '自社'}</p>
+              {vehicles.filter(v => v.category === cat).length === 0 && (
+                <p className="text-sm text-gray-400 pb-2">登録なし</p>
+              )}
+              <div className="flex flex-col gap-1">
+                {vehicles.filter(v => v.category === cat).map(v => (
+                  <div key={v.id} className="flex justify-between items-center text-sm py-2 border-b last:border-0">
+                    <span>{v.name}</span>
+                    <div className="flex items-center gap-2">
+                      {editingVehiclePrice?.id === v.id ? (
+                        <div className="flex items-center gap-1">
+                          <input type="number" inputMode="decimal" step="0.01" className="border rounded px-2 py-1 text-sm w-24"
+                            value={editingVehiclePrice.price}
+                            onChange={e => setEditingVehiclePrice({ ...editingVehiclePrice, price: e.target.value })} />
+                          <span className="text-xs text-gray-500">円/{v.unit}</span>
+                          <button onClick={() => updateVehiclePrice(v.id, editingVehiclePrice.price)} className="text-blue-600 text-xs">✓</button>
+                          <button onClick={() => setEditingVehiclePrice(null)} className="text-gray-400 text-xs">✕</button>
+                        </div>
+                      ) : (
+                        <button onClick={() => setEditingVehiclePrice({ id: v.id, price: v.default_price ? String(v.default_price) : '' })}
+                          className="text-sm text-gray-700 hover:text-blue-600">
+                          {v.default_price ? `${v.default_price.toLocaleString()}円/${v.unit}` : '単価未設定'}
+                        </button>
+                      )}
+                      <button onClick={() => deleteVehicle(v.id)} className="text-gray-300 hover:text-red-400 text-xs">削除</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
         </section>
       )}
 

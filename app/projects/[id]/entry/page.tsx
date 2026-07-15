@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { supabase, DisposalSite, WasteType } from '@/lib/supabase'
+import { supabase, DisposalSite, WasteType, Vehicle } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
 
 type Tab = 'waste' | 'labor' | 'fuel' | 'lease' | 'expense'
@@ -45,6 +45,7 @@ export default function EntryPage() {
   const [sites, setSites] = useState<DisposalSite[]>([])
   const [wasteTypes, setWasteTypes] = useState<WasteType[]>([])
   const [workers, setWorkers] = useState<Worker[]>([])
+  const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
   const [receiptError, setReceiptError] = useState<string | null>(null)
@@ -53,19 +54,24 @@ export default function EntryPage() {
   const [wasteForm, setWasteForm] = useState({ date: today, site_id: '', waste_type_id: '', quantity: '' })
   const [laborDate, setLaborDate] = useState(today)
   const [workerDayType, setWorkerDayType] = useState<Record<number, DayType>>({})
-  const [otherForm, setOtherForm] = useState({ date: today, unit_price: '', note: '', quantity: '', fuel_type: '' as '' | '軽油' | 'レギュラー' })
+  const [otherForm, setOtherForm] = useState({
+    date: today, unit_price: '', note: '', quantity: '', fuel_type: '' as '' | '軽油' | 'レギュラー',
+    vehicle_category: '' as '' | 'rental' | 'owned', vehicle_id: '',
+  })
 
   useEffect(() => { loadMaster() }, [])
 
   async function loadMaster() {
-    const [{ data: s }, { data: w }, { data: wk }] = await Promise.all([
+    const [{ data: s }, { data: w }, { data: wk }, { data: v }] = await Promise.all([
       supabase.from('disposal_sites').select('*').order('name'),
       supabase.from('waste_types').select('*, disposal_sites(name)').order('name'),
       supabase.from('workers').select('*').order('name'),
+      supabase.from('vehicles').select('*').order('name'),
     ])
     setSites(s ?? [])
     setWasteTypes((w as any) ?? [])
     setWorkers(wk ?? [])
+    setVehicles(v ?? [])
   }
 
   function toggleWorker(workerId: number) {
@@ -140,10 +146,11 @@ export default function EntryPage() {
       amount,
       note: otherForm.note || null,
       fuel_type: tab === 'fuel' ? (otherForm.fuel_type || null) : null,
+      vehicle_id: tab === 'lease' && otherForm.vehicle_id ? Number(otherForm.vehicle_id) : null,
     })
     setSaving(false)
     setSuccess(true)
-    setOtherForm({ date: otherForm.date, unit_price: '', note: '', quantity: '', fuel_type: '' })
+    setOtherForm({ date: otherForm.date, unit_price: '', note: '', quantity: '', fuel_type: '', vehicle_category: '', vehicle_id: '' })
     setTimeout(() => setSuccess(false), 2000)
   }
 
@@ -163,7 +170,7 @@ export default function EntryPage() {
         <button className={tabClass('waste')} onClick={() => setTab('waste')}>廃材</button>
         <button className={tabClass('labor')} onClick={() => setTab('labor')}>人工</button>
         <button className={tabClass('fuel')} onClick={() => setTab('fuel')}>燃料代</button>
-        <button className={tabClass('lease')} onClick={() => setTab('lease')}>リース代</button>
+        <button className={tabClass('lease')} onClick={() => setTab('lease')}>車両代</button>
         <button className={tabClass('expense')} onClick={() => setTab('expense')}>経費</button>
       </div>
 
@@ -276,6 +283,38 @@ export default function EntryPage() {
             <input type="date" className="w-full border rounded px-3 py-3 text-base" value={otherForm.date}
               onChange={e => setOtherForm({ ...otherForm, date: e.target.value })} />
           </div>
+          {tab === 'lease' && (
+            <>
+              <div>
+                <label className="block text-sm font-medium mb-1">区分</label>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setOtherForm({ ...otherForm, vehicle_category: 'rental', vehicle_id: '' })}
+                    className={`flex-1 py-3 rounded border text-sm font-medium ${otherForm.vehicle_category === 'rental' ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600'}`}>
+                    リース
+                  </button>
+                  <button type="button" onClick={() => setOtherForm({ ...otherForm, vehicle_category: 'owned', vehicle_id: '' })}
+                    className={`flex-1 py-3 rounded border text-sm font-medium ${otherForm.vehicle_category === 'owned' ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600'}`}>
+                    自社
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">車両・重機</label>
+                <select className="w-full border rounded px-3 py-3 text-base" value={otherForm.vehicle_id}
+                  disabled={!otherForm.vehicle_category}
+                  onChange={e => {
+                    const vid = e.target.value
+                    const v = vehicles.find(v => String(v.id) === vid)
+                    setOtherForm(f => ({ ...f, vehicle_id: vid, unit_price: v?.default_price ? String(v.default_price) : f.unit_price }))
+                  }}>
+                  <option value="">選択してください</option>
+                  {vehicles.filter(v => v.category === otherForm.vehicle_category).map(v => (
+                    <option key={v.id} value={v.id}>{v.name}{v.default_price ? `（${v.default_price.toLocaleString()}円/${v.unit}）` : ''}</option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
           {tab === 'fuel' && (
             <>
               <div>

@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState, useRef } from 'react'
-import { supabase, Project, WasteEntry, OtherEntry, DisposalSite, WasteType } from '@/lib/supabase'
+import { supabase, Project, WasteEntry, OtherEntry, DisposalSite, WasteType, Vehicle } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 
@@ -15,7 +15,7 @@ const LABOR_UNIT_PRICE_HALF = Math.round(LABOR_UNIT_PRICE / 2)
 type EditTarget =
   | { type: 'waste'; id: number; date: string; site_id: string; waste_type_id: string; quantity: string }
   | { type: 'labor'; id: number; date: string; worker_id: string; day_type: 'full' | 'half' }
-  | { type: 'other'; id: number; entry_type: 'fuel' | 'lease' | 'expense'; date: string; unit_price: string; quantity: string; fuel_type: '' | '軽油' | 'レギュラー'; note: string }
+  | { type: 'other'; id: number; entry_type: 'fuel' | 'lease' | 'expense'; date: string; unit_price: string; quantity: string; fuel_type: '' | '軽油' | 'レギュラー'; note: string; vehicle_category: '' | 'rental' | 'owned'; vehicle_id: string }
 
 function CostBar({ label, amount, max, color }: { label: string; amount: number; max: number; color: string }) {
   const pct = max > 0 ? Math.round((amount / max) * 100) : 0
@@ -47,6 +47,7 @@ export default function ProjectDetailPage() {
   const [sites, setSites] = useState<DisposalSite[]>([])
   const [wasteTypes, setWasteTypes] = useState<WasteType[]>([])
   const [workers, setWorkers] = useState<Worker[]>([])
+  const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null)
   const [editSaving, setEditSaving] = useState(false)
   const [showChart, setShowChart] = useState(true)
@@ -59,15 +60,16 @@ export default function ProjectDetailPage() {
   useEffect(() => { load() }, [id])
 
   async function load() {
-    const [{ data: p }, { data: we }, { data: oe }, { data: le }, { data: sr }, { data: s }, { data: wt }, { data: wk }] = await Promise.all([
+    const [{ data: p }, { data: we }, { data: oe }, { data: le }, { data: sr }, { data: s }, { data: wt }, { data: wk }, { data: vh }] = await Promise.all([
       supabase.from('projects').select('*').eq('id', id).single(),
       supabase.from('waste_entries').select('*, waste_types(name, unit, unit_price, entry_type, disposal_site_id, disposal_sites(name))').eq('project_id', id).order('date', { ascending: false }),
-      supabase.from('other_entries').select('*').eq('project_id', id).order('date', { ascending: false }),
+      supabase.from('other_entries').select('*, vehicles(name, category)').eq('project_id', id).order('date', { ascending: false }),
       supabase.from('labor_entries').select('*, workers(name, company_name)').eq('project_id', id).order('date', { ascending: false }),
       supabase.from('scrap_records').select('date, items, note, amount').eq('project_id', id),
       supabase.from('disposal_sites').select('*').order('name'),
       supabase.from('waste_types').select('*').order('name'),
       supabase.from('workers').select('*').order('name'),
+      supabase.from('vehicles').select('*').order('name'),
     ])
     setProject(p)
     setNotesValue(p?.notes ?? '')
@@ -78,6 +80,7 @@ export default function ProjectDetailPage() {
     setSites(s ?? [])
     setWasteTypes((wt as any) ?? [])
     setWorkers(wk ?? [])
+    setVehicles(vh ?? [])
     setLoading(false)
   }
 
@@ -110,6 +113,8 @@ export default function ProjectDetailPage() {
       quantity: e.entry_type === 'fuel' && Number(e.quantity) ? String(e.quantity) : '',
       fuel_type: (e.fuel_type === '軽油' || e.fuel_type === 'レギュラー') ? e.fuel_type : '',
       note: e.note ?? '',
+      vehicle_category: e.vehicles?.category ?? '',
+      vehicle_id: e.vehicle_id ? String(e.vehicle_id) : '',
     })
   }
 
@@ -142,6 +147,7 @@ export default function ProjectDetailPage() {
         amount,
         note: editTarget.note || null,
         fuel_type: editTarget.entry_type === 'fuel' ? (editTarget.fuel_type || null) : null,
+        vehicle_id: editTarget.entry_type === 'lease' && editTarget.vehicle_id ? Number(editTarget.vehicle_id) : null,
       }).eq('id', editTarget.id)
     }
     setEditSaving(false)
@@ -199,7 +205,7 @@ export default function ProjectDetailPage() {
     sortedOther.forEach((e: any) => {
       const label = e.entry_type === 'fuel' ? `燃料代${e.fuel_type ? `（${e.fuel_type}）` : ''}`
         : e.entry_type === 'expense' ? '経費'
-        : 'リース代'
+        : `車両代${e.vehicles ? `（${e.vehicles.category === 'owned' ? '自社' : 'リース'}・${e.vehicles.name}）` : ''}`
       const isFuelWithLiters = e.entry_type === 'fuel' && Number(e.quantity) > 0 && Number(e.quantity) !== 1
       rows.push([
         e.date, label, '', e.note ?? '',
@@ -238,6 +244,8 @@ export default function ProjectDetailPage() {
   const laborAmt = laborEntries.reduce((s, e) => s + Number(e.amount), 0) + otherEntries.filter(e => e.entry_type === 'labor').reduce((s, e) => s + Number(e.amount), 0)
   const fuelAmt = otherEntries.filter(e => e.entry_type === 'fuel').reduce((s, e) => s + Number(e.amount), 0)
   const leaseAmt = otherEntries.filter(e => e.entry_type === 'lease').reduce((s, e) => s + Number(e.amount), 0)
+  const leaseRentalAmt = otherEntries.filter(e => e.entry_type === 'lease' && e.vehicles?.category === 'rental').reduce((s, e) => s + Number(e.amount), 0)
+  const leaseOwnedAmt = otherEntries.filter(e => e.entry_type === 'lease' && e.vehicles?.category === 'owned').reduce((s, e) => s + Number(e.amount), 0)
   const expenseAmt = otherEntries.filter(e => e.entry_type === 'expense').reduce((s, e) => s + Number(e.amount), 0)
   const totalCost = wasteCost + laborAmt + fuelAmt + leaseAmt + expenseAmt
   const profit = scrapRevenue - totalCost
@@ -251,7 +259,7 @@ export default function ProjectDetailPage() {
   const sortedLabor = [...laborEntries].sort(sortFn)
   const sortedOther = [...otherEntries].sort(sortFn)
 
-  const otherLabel: Record<string, string> = { labor: '人工', fuel: '燃料代', lease: 'リース代', expense: '経費' }
+  const otherLabel: Record<string, string> = { labor: '人工', fuel: '燃料代', lease: '車両代', expense: '経費' }
 
   return (
     <div>
@@ -355,6 +363,38 @@ export default function ProjectDetailPage() {
                   <input type="date" className="w-full border rounded px-3 py-2 text-base" value={editTarget.date}
                     onChange={e => setEditTarget({ ...editTarget, date: e.target.value })} />
                 </div>
+                {editTarget.entry_type === 'lease' && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">区分</label>
+                      <div className="flex gap-2">
+                        <button type="button" onClick={() => setEditTarget({ ...editTarget, vehicle_category: 'rental', vehicle_id: '' })}
+                          className={`flex-1 py-2 rounded border text-sm font-medium ${editTarget.vehicle_category === 'rental' ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600'}`}>
+                          リース
+                        </button>
+                        <button type="button" onClick={() => setEditTarget({ ...editTarget, vehicle_category: 'owned', vehicle_id: '' })}
+                          className={`flex-1 py-2 rounded border text-sm font-medium ${editTarget.vehicle_category === 'owned' ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600'}`}>
+                          自社
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">車両・重機</label>
+                      <select className="w-full border rounded px-3 py-2 text-base" value={editTarget.vehicle_id}
+                        disabled={!editTarget.vehicle_category}
+                        onChange={e => {
+                          const vid = e.target.value
+                          const v = vehicles.find(v => String(v.id) === vid)
+                          setEditTarget(t => t && t.type === 'other' ? { ...t, vehicle_id: vid, unit_price: v?.default_price ? String(v.default_price) : t.unit_price } : t)
+                        }}>
+                        <option value="">選択してください</option>
+                        {vehicles.filter(v => v.category === editTarget.vehicle_category).map(v => (
+                          <option key={v.id} value={v.id}>{v.name}{v.default_price ? `（${v.default_price.toLocaleString()}円/${v.unit}）` : ''}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </>
+                )}
                 {editTarget.entry_type === 'fuel' && (
                   <>
                     <div>
@@ -467,6 +507,12 @@ export default function ProjectDetailPage() {
           <span className="font-medium text-xs text-gray-700">KY活動</span>
           <span className="text-xs text-gray-400">写真記録</span>
         </Link>
+        <Link href={`/projects/${id}/tools`}
+          className="bg-white rounded-lg shadow p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
+          <span className="text-2xl">🧰</span>
+          <span className="font-medium text-xs text-gray-700">使用道具</span>
+          <span className="text-xs text-gray-400">貸出・返却</span>
+        </Link>
       </div>
 
       {/* 上空図面 */}
@@ -542,7 +588,12 @@ export default function ProjectDetailPage() {
           <div className="text-gray-600">スクラップ収益</div><div className="text-right font-medium text-blue-600">{fmt(scrapRevenue)}</div>
           <div className="text-gray-600">人工費</div><div className="text-right">{fmt(laborAmt)}</div>
           <div className="text-gray-600">燃料代</div><div className="text-right">{fmt(fuelAmt)}</div>
-          <div className="text-gray-600">リース代</div><div className="text-right">{fmt(leaseAmt)}</div>
+          <div className="text-gray-600">車両代</div><div className="text-right">{fmt(leaseAmt)}</div>
+          {leaseAmt > 0 && (
+            <div className="col-span-2 text-xs text-gray-400 flex justify-between -mt-0.5 mb-0.5">
+              <span>内訳：リース {fmt(leaseRentalAmt)}／自社 {fmt(leaseOwnedAmt)}</span>
+            </div>
+          )}
           <div className="text-gray-600">経費</div><div className="text-right">{fmt(expenseAmt)}</div>
           <div className="font-bold border-t pt-1 mt-1">支出合計</div>
           <div className="text-right font-bold border-t pt-1 mt-1 text-red-700">{fmt(totalCost)}</div>
@@ -564,7 +615,7 @@ export default function ProjectDetailPage() {
             <CostBar label="スクラップ収益" amount={scrapRevenue} max={maxBar} color="bg-blue-400" />
             <CostBar label="人工費" amount={laborAmt} max={maxBar} color="bg-orange-400" />
             <CostBar label="燃料代" amount={fuelAmt} max={maxBar} color="bg-yellow-400" />
-            <CostBar label="リース代" amount={leaseAmt} max={maxBar} color="bg-purple-400" />
+            <CostBar label="車両代" amount={leaseAmt} max={maxBar} color="bg-purple-400" />
             <CostBar label="経費" amount={expenseAmt} max={maxBar} color="bg-gray-400" />
           </div>
         )}
@@ -645,6 +696,11 @@ export default function ProjectDetailPage() {
               <span className="text-gray-500 mx-1">·</span>
               <span>{otherLabel[e.entry_type]}</span>
               {e.fuel_type && <span className="text-gray-500 ml-1">（{e.fuel_type}{Number(e.quantity) > 0 && Number(e.quantity) !== 1 ? ` ${e.quantity}L` : ''}）</span>}
+              {e.vehicles && (
+                <span className={`text-xs ml-1 px-1 rounded ${e.vehicles.category === 'owned' ? 'bg-green-100 text-green-700' : 'bg-purple-100 text-purple-700'}`}>
+                  {e.vehicles.category === 'owned' ? '自社' : 'リース'}・{e.vehicles.name}
+                </span>
+              )}
               {e.note && <span className="text-gray-500 ml-1">({e.note})</span>}
             </div>
             <div className="flex items-center gap-3 shrink-0 ml-2">
