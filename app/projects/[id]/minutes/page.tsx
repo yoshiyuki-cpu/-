@@ -52,8 +52,73 @@ export default function MinutesPage() {
   const [photoError, setPhotoError] = useState<string | null>(null)
   const [enlarged, setEnlarged] = useState<string | null>(null)
   const photoInputRef = useRef<HTMLInputElement>(null)
+  const [voiceSupported, setVoiceSupported] = useState(true)
+  const [recording, setRecording] = useState(false)
+  const [voiceText, setVoiceText] = useState('')
+  const [analyzingVoice, setAnalyzingVoice] = useState(false)
+  const [voiceError, setVoiceError] = useState<string | null>(null)
+  const recognitionRef = useRef<any>(null)
 
   useEffect(() => { load() }, [id])
+
+  useEffect(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    setVoiceSupported(!!SR)
+  }, [])
+
+  function startRecording() {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SR) { setVoiceError('このブラウザは音声入力に対応していません。写真または直接入力をご利用ください。'); return }
+    setVoiceError(null)
+    setVoiceText('')
+    const recognition = new SR()
+    recognition.lang = 'ja-JP'
+    recognition.continuous = true
+    recognition.interimResults = true
+    recognition.onresult = (e: any) => {
+      let text = ''
+      for (let i = 0; i < e.results.length; i++) text += e.results[i][0].transcript
+      setVoiceText(text)
+    }
+    recognition.onerror = () => {
+      setVoiceError('音声認識でエラーが発生しました。もう一度お試しください。')
+      setRecording(false)
+    }
+    recognition.onend = () => setRecording(false)
+    recognitionRef.current = recognition
+    recognition.start()
+    setRecording(true)
+  }
+
+  function stopRecording() {
+    recognitionRef.current?.stop()
+    setRecording(false)
+  }
+
+  async function analyzeVoice() {
+    if (!voiceText.trim()) return
+    setAnalyzingVoice(true)
+    setVoiceError(null)
+    try {
+      const res = await fetch('/api/analyze-voice-minutes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: voiceText }),
+      })
+      if (!res.ok) throw new Error('request failed')
+      const json = await res.json()
+      setForm(f => ({
+        ...f,
+        danger_points: json.danger_points || f.danger_points,
+        cautions: json.cautions || f.cautions,
+        notices: json.notices || f.notices,
+      }))
+    } catch {
+      setVoiceError('AIでの整形に失敗しました。文字起こし内容を確認し、直接入力してください。')
+    } finally {
+      setAnalyzingVoice(false)
+    }
+  }
 
   async function load() {
     setLoading(true)
@@ -122,6 +187,8 @@ export default function MinutesPage() {
     setForm({ date: today, danger_points: '', cautions: '', notices: '' })
     setPhotoUrl(null)
     setPhotoError(null)
+    setVoiceText('')
+    setVoiceError(null)
     if (photoInputRef.current) photoInputRef.current.value = ''
     await load()
     setTimeout(() => { setSuccess(false); setMode('list') }, 1000)
@@ -272,6 +339,42 @@ export default function MinutesPage() {
             </label>
           )}
           {photoError && <p className="text-sm text-red-500 mt-1">{photoError}</p>}
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-2">🎤 音声で記録（AIが文字起こし・誤字修正）</label>
+          {!voiceSupported && (
+            <p className="text-sm text-gray-400">このブラウザは音声入力に対応していません。写真または直接入力をご利用ください。</p>
+          )}
+          {voiceSupported && (
+            <div className="flex flex-col gap-2">
+              {!recording ? (
+                <button type="button" onClick={startRecording}
+                  className="flex items-center justify-center gap-2 w-full border-2 border-dashed border-blue-300 bg-blue-50 hover:bg-blue-100 rounded-lg py-4">
+                  <span className="text-2xl">🎤</span>
+                  <span className="text-sm font-medium text-blue-700">タップして録音開始</span>
+                </button>
+              ) : (
+                <button type="button" onClick={stopRecording}
+                  className="flex items-center justify-center gap-2 w-full border-2 border-red-300 bg-red-50 rounded-lg py-4 animate-pulse">
+                  <span className="text-2xl">⏺</span>
+                  <span className="text-sm font-medium text-red-700">録音中...タップして停止</span>
+                </button>
+              )}
+              {voiceText && (
+                <>
+                  <textarea className="w-full border rounded px-3 py-2 text-sm resize-none bg-gray-50" rows={3}
+                    value={voiceText} onChange={e => setVoiceText(e.target.value)}
+                    placeholder="文字起こし結果（必要に応じて修正できます）" />
+                  <button type="button" onClick={analyzeVoice} disabled={analyzingVoice || recording}
+                    className="bg-blue-600 text-white py-2 rounded text-sm font-medium disabled:opacity-50">
+                    {analyzingVoice ? 'AIで整形中...' : 'AIで整えてフォームに反映'}
+                  </button>
+                </>
+              )}
+              {voiceError && <p className="text-sm text-red-500">{voiceError}</p>}
+            </div>
+          )}
         </div>
 
         <div>
