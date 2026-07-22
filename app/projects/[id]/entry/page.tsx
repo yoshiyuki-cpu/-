@@ -56,7 +56,7 @@ export default function EntryPage() {
   const [workerDayType, setWorkerDayType] = useState<Record<number, DayType>>({})
   const [otherForm, setOtherForm] = useState({
     date: today, unit_price: '', note: '', quantity: '', fuel_type: '' as '' | '軽油' | 'レギュラー',
-    vehicle_category: '' as '' | 'rental' | 'owned', vehicle_id: '',
+    vehicle_category: '' as '' | 'rental' | 'owned', vehicle_id: '', liter_price: '',
   })
 
   useEffect(() => { loadMaster() }, [])
@@ -150,7 +150,7 @@ export default function EntryPage() {
     })
     setSaving(false)
     setSuccess(true)
-    setOtherForm({ date: otherForm.date, unit_price: '', note: '', quantity: '', fuel_type: '', vehicle_category: '', vehicle_id: '' })
+    setOtherForm({ date: otherForm.date, unit_price: '', note: '', quantity: '', fuel_type: '', vehicle_category: '', vehicle_id: '', liter_price: '' })
     setTimeout(() => setSuccess(false), 2000)
   }
 
@@ -333,7 +333,30 @@ export default function EntryPage() {
               <div>
                 <label className="block text-sm font-medium mb-1">数量（リットル）</label>
                 <input type="number" step="0.01" inputMode="decimal" className="w-full border rounded px-3 py-3 text-base" value={otherForm.quantity}
-                  onChange={e => setOtherForm({ ...otherForm, quantity: e.target.value })} placeholder="0" />
+                  onChange={e => {
+                    const quantity = e.target.value
+                    setOtherForm(f => ({
+                      ...f, quantity,
+                      unit_price: f.liter_price && quantity ? String(Math.round(Number(f.liter_price) * Number(quantity))) : f.unit_price,
+                    }))
+                  }} placeholder="0" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">単価（円/L・任意）</label>
+                <input type="number" step="0.01" inputMode="decimal" className="w-full border rounded px-3 py-3 text-base" value={otherForm.liter_price}
+                  onChange={e => {
+                    const literPrice = e.target.value
+                    setOtherForm(f => ({
+                      ...f, liter_price: literPrice,
+                      unit_price: literPrice && f.quantity ? String(Math.round(Number(literPrice) * Number(f.quantity))) : f.unit_price,
+                    }))
+                  }} placeholder="例：165" />
+                <p className="text-xs text-gray-400 mt-1">カード給油などレシートに金額が出ない場合、その日の単価を入れると金額欄に自動計算されます</p>
+                {otherForm.liter_price && otherForm.quantity && (
+                  <p className="text-sm text-gray-500 mt-1">
+                    金額: <span className="font-medium text-gray-800">{Math.round(Number(otherForm.liter_price) * Number(otherForm.quantity)).toLocaleString()}円</span>
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">レシート写真から読み取る（任意）</label>

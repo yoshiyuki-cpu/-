@@ -15,7 +15,7 @@ const LABOR_UNIT_PRICE_HALF = Math.round(LABOR_UNIT_PRICE / 2)
 type EditTarget =
   | { type: 'waste'; id: number; date: string; site_id: string; waste_type_id: string; quantity: string }
   | { type: 'labor'; id: number; date: string; worker_id: string; day_type: 'full' | 'half' }
-  | { type: 'other'; id: number; entry_type: 'fuel' | 'lease' | 'expense'; date: string; unit_price: string; quantity: string; fuel_type: '' | '軽油' | 'レギュラー'; note: string; vehicle_category: '' | 'rental' | 'owned'; vehicle_id: string }
+  | { type: 'other'; id: number; entry_type: 'fuel' | 'lease' | 'expense'; date: string; unit_price: string; quantity: string; fuel_type: '' | '軽油' | 'レギュラー'; note: string; vehicle_category: '' | 'rental' | 'owned'; vehicle_id: string; liter_price: string }
 
 function CostBar({ label, amount, max, color }: { label: string; amount: number; max: number; color: string }) {
   const pct = max > 0 ? Math.round((amount / max) * 100) : 0
@@ -115,6 +115,7 @@ export default function ProjectDetailPage() {
       note: e.note ?? '',
       vehicle_category: e.vehicles?.category ?? '',
       vehicle_id: e.vehicle_id ? String(e.vehicle_id) : '',
+      liter_price: '',
     })
   }
 
@@ -413,7 +414,25 @@ export default function ProjectDetailPage() {
                     <div>
                       <label className="block text-sm font-medium mb-1">数量（リットル）</label>
                       <input type="number" step="0.01" inputMode="decimal" className="w-full border rounded px-3 py-2 text-base"
-                        value={editTarget.quantity} onChange={e => setEditTarget({ ...editTarget, quantity: e.target.value })} />
+                        value={editTarget.quantity} onChange={e => {
+                          const quantity = e.target.value
+                          setEditTarget(t => t && t.type === 'other' ? {
+                            ...t, quantity,
+                            unit_price: t.liter_price && quantity ? String(Math.round(Number(t.liter_price) * Number(quantity))) : t.unit_price,
+                          } : t)
+                        }} />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">単価（円/L・任意）</label>
+                      <input type="number" step="0.01" inputMode="decimal" className="w-full border rounded px-3 py-2 text-base"
+                        value={editTarget.liter_price} placeholder="例：165" onChange={e => {
+                          const literPrice = e.target.value
+                          setEditTarget(t => t && t.type === 'other' ? {
+                            ...t, liter_price: literPrice,
+                            unit_price: literPrice && t.quantity ? String(Math.round(Number(literPrice) * Number(t.quantity))) : t.unit_price,
+                          } : t)
+                        }} />
+                      <p className="text-xs text-gray-400 mt-1">単価を入れると金額欄に自動計算されます</p>
                     </div>
                   </>
                 )}
