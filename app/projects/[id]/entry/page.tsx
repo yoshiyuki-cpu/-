@@ -56,7 +56,7 @@ export default function EntryPage() {
   const [workerDayType, setWorkerDayType] = useState<Record<number, DayType>>({})
   const [otherForm, setOtherForm] = useState({
     date: today, unit_price: '', note: '', quantity: '', fuel_type: '' as '' | '軽油' | 'レギュラー',
-    vehicle_category: '' as '' | 'rental' | 'owned', vehicle_id: '', liter_price: '',
+    vehicle_category: '' as '' | 'rental' | 'owned', vehicle_id: '', liter_price: '165',
   })
 
   useEffect(() => { loadMaster() }, [])
@@ -150,7 +150,7 @@ export default function EntryPage() {
     })
     setSaving(false)
     setSuccess(true)
-    setOtherForm({ date: otherForm.date, unit_price: '', note: '', quantity: '', fuel_type: '', vehicle_category: '', vehicle_id: '', liter_price: '' })
+    setOtherForm({ date: otherForm.date, unit_price: '', note: '', quantity: '', fuel_type: '', vehicle_category: '', vehicle_id: '', liter_price: '165' })
     setTimeout(() => setSuccess(false), 2000)
   }
 
@@ -351,7 +351,7 @@ export default function EntryPage() {
                       unit_price: literPrice && f.quantity ? String(Math.round(Number(literPrice) * Number(f.quantity))) : f.unit_price,
                     }))
                   }} placeholder="例：165" />
-                <p className="text-xs text-gray-400 mt-1">カード給油などレシートに金額が出ない場合、その日の単価を入れると金額欄に自動計算されます</p>
+                <p className="text-xs text-gray-400 mt-1">既定値165円で自動計算されます。単価が異なる日は上書きしてください</p>
                 {otherForm.liter_price && otherForm.quantity && (
                   <p className="text-sm text-gray-500 mt-1">
                     金額: <span className="font-medium text-gray-800">{Math.round(Number(otherForm.liter_price) * Number(otherForm.quantity)).toLocaleString()}円</span>
