@@ -192,9 +192,11 @@ export type EstimateItem = {
 export type ScaffoldPlan = {
   id: number
   project_id: number
-  input_mode: 'directions' | 'rect' | 'perimeter'
+  input_mode: 'directions' | 'rect' | 'perimeter' | 'trace'
   span_interval_m: number
   level_height_m: number
+  image_url: string | null
+  scale_m_per_px: number | null
   created_at: string
   updated_at: string
 }
@@ -206,6 +208,8 @@ export type ScaffoldSegment = {
   label: string | null
   length_m: number
   height_m: number
+  vertex_x_px: number | null
+  vertex_y_px: number | null
 }
 
 export type CompanySettings = {
