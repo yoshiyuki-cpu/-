@@ -189,6 +189,25 @@ export type EstimateItem = {
   category: string | null
 }
 
+export type ScaffoldPlan = {
+  id: number
+  project_id: number
+  input_mode: 'directions' | 'rect' | 'perimeter'
+  span_interval_m: number
+  level_height_m: number
+  created_at: string
+  updated_at: string
+}
+
+export type ScaffoldSegment = {
+  id: number
+  plan_id: number
+  order_index: number
+  label: string | null
+  length_m: number
+  height_m: number
+}
+
 export type CompanySettings = {
   id: number
   name: string
