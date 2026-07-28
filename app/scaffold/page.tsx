@@ -1,5 +1,7 @@
 'use client'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
+import { supabase, ScaffoldMaterialPrice } from '@/lib/supabase'
 
 type InputMode = 'directions' | 'rect' | 'perimeter'
 type UsageRow = { key: string; label: string; count: string }
@@ -69,6 +71,11 @@ export default function ScaffoldCalcPage() {
   const [spanInterval, setSpanInterval] = useState('1.8')
   const [levelHeight, setLevelHeight] = useState('1.8')
   const [usageRows, setUsageRows] = useState<UsageRow[]>([])
+  const [materialPrices, setMaterialPrices] = useState<ScaffoldMaterialPrice[]>([])
+
+  useEffect(() => {
+    supabase.from('scaffold_material_prices').select('*').then(({ data }) => setMaterialPrices(data ?? []))
+  }, [])
 
   const span = Number(spanInterval) || 0
   const level = Number(levelHeight) || 0
@@ -111,6 +118,18 @@ export default function ScaffoldCalcPage() {
   const totalPipes = Object.fromEntries(
     STANDARD_LENGTHS.map(len => [len, (tatejiPipes[len] ?? 0) + (nunoPipes[len] ?? 0)])
   )
+
+  const pipePrice = (len: number) => materialPrices.find(p => p.category === 'pipe' && p.label === String(len))?.unit_price ?? null
+  const usagePrice = (label: string) => materialPrices.find(p => p.category === 'usage' && p.label === label)?.unit_price ?? null
+  const pipeCostRows = STANDARD_LENGTHS.map(len => ({ len, price: pipePrice(len), count: totalPipes[len] ?? 0 }))
+  const usageCostRows = usageRows
+    .filter(r => r.label)
+    .map(r => ({ label: r.label, price: usagePrice(r.label), count: Number(r.count) || 0 }))
+  const pipeCost = pipeCostRows.reduce((sum, r) => sum + (r.price ?? 0) * r.count, 0)
+  const usageCost = usageCostRows.reduce((sum, r) => sum + (r.price ?? 0) * r.count, 0)
+  const totalCost = pipeCost + usageCost
+  const hasUnsetPrice =
+    pipeCostRows.some(r => r.count > 0 && r.price === null) || usageCostRows.some(r => r.count > 0 && r.price === null)
 
   function addUsageRow(label = '') {
     setUsageRows(rs => [...rs, { key: nextKey(), label, count: '' }])
@@ -298,6 +317,35 @@ export default function ScaffoldCalcPage() {
           <p className="text-xs text-gray-400 mt-3">
             建地は辺（または全体）の高さを規格長で継いだ場合の内訳、布は1本あたりスパン間隔{span || 0}mに収まる規格1本の内訳です。
           </p>
+        </div>
+      )}
+
+      {hasResult && (
+        <div className="bg-white rounded-lg shadow p-4 mt-4">
+          <h2 className="font-bold mb-3 text-gray-700">資材コスト（概算）</h2>
+          <div className="flex flex-col gap-1">
+            {pipeCostRows.map(r => (
+              <div key={r.len} className="flex justify-between items-center text-sm py-1 border-b last:border-0">
+                <span>単管{r.len}m（{r.count}本）</span>
+                <span>{r.price !== null ? `${(r.price * r.count).toLocaleString()}円` : '単価未設定'}</span>
+              </div>
+            ))}
+            {usageCostRows.map(r => (
+              <div key={r.label} className="flex justify-between items-center text-sm py-1 border-b last:border-0">
+                <span>{r.label}（{r.count}本）</span>
+                <span>{r.price !== null ? `${(r.price * r.count).toLocaleString()}円` : '単価未設定'}</span>
+              </div>
+            ))}
+            <div className="flex justify-between items-center text-sm py-2 mt-1">
+              <span className="text-gray-600 font-medium">合計（概算）</span>
+              <span className="font-bold text-gray-900">{totalCost.toLocaleString()}円</span>
+            </div>
+          </div>
+          {hasUnsetPrice && (
+            <p className="text-xs text-gray-400 mt-2">
+              単価未設定の項目は0円として合計しています。単価は<Link href="/master" className="text-blue-600">マスタ管理 &gt; 足場材料単価</Link>で設定できます。
+            </p>
+          )}
         </div>
       )}
 

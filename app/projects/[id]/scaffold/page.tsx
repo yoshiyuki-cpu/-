@@ -1,7 +1,8 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { supabase, Project, ScaffoldPlan, ScaffoldSegment } from '@/lib/supabase'
+import Link from 'next/link'
+import { supabase, Project, ScaffoldPlan, ScaffoldSegment, ScaffoldMaterialPrice } from '@/lib/supabase'
 
 type InputMode = 'directions' | 'rect' | 'perimeter' | 'trace'
 type UsageRow = { key: string; label: string; count: string }
@@ -54,6 +55,24 @@ function addPipeCounts(a: Record<number, number>, b: Record<number, number>): Re
 
 function dist(a: Point, b: Point) {
   return Math.hypot(a.x - b.x, a.y - b.y)
+}
+
+// 多角形の各頂点を出隅（凸）／入隅（凹）に分類する（表示用。本数計算には影響しない）
+// シューレース公式で全体の周回方向を求め、各頂点の外積の符号が周回方向と一致すれば出隅、逆なら入隅とする
+function classifyCorners(vertices: Point[]): ('convex' | 'concave')[] {
+  const n = vertices.length
+  if (n < 3) return vertices.map(() => 'convex')
+  let signedArea = 0
+  for (let i = 0; i < n; i++) {
+    const a = vertices[i], b = vertices[(i + 1) % n]
+    signedArea += a.x * b.y - b.x * a.y
+  }
+  return vertices.map((c, i) => {
+    const p = vertices[(i - 1 + n) % n]
+    const next = vertices[(i + 1) % n]
+    const cross = (c.x - p.x) * (next.y - c.y) - (c.y - p.y) * (next.x - c.x)
+    return Math.sign(cross) === Math.sign(signedArea) || cross === 0 ? 'convex' : 'concave'
+  })
 }
 
 // スマホカメラの写真は数MB〜十数MBあり、そのままアップロードするとモバイルブラウザが重くなるため
@@ -124,8 +143,11 @@ export default function ProjectScaffoldCalcPage() {
   const [polygonClosed, setPolygonClosed] = useState(false)
   const [segmentHeights, setSegmentHeights] = useState<string[]>([])
   const [dragTarget, setDragTarget] = useState<{ kind: 'calib' | 'vertex'; index: number } | null>(null)
+  const [zoomLevel, setZoomLevel] = useState(1)
   const svgRef = useRef<SVGSVGElement | null>(null)
   const traceFileInputRef = useRef<HTMLInputElement | null>(null)
+
+  const [materialPrices, setMaterialPrices] = useState<ScaffoldMaterialPrice[]>([])
 
   const span = Number(spanInterval) || 0
   const level = Number(levelHeight) || 0
@@ -135,11 +157,13 @@ export default function ProjectScaffoldCalcPage() {
 
   async function load() {
     setLoading(true)
-    const [{ data: p }, { data: plan }] = await Promise.all([
+    const [{ data: p }, { data: plan }, { data: prices }] = await Promise.all([
       supabase.from('projects').select('*').eq('id', id).single(),
       supabase.from('scaffold_plans').select('*').eq('project_id', id).maybeSingle(),
+      supabase.from('scaffold_material_prices').select('*'),
     ])
     setProject(p ?? null)
+    setMaterialPrices(prices ?? [])
 
     if (plan) {
       const scaffoldPlan = plan as ScaffoldPlan
@@ -415,6 +439,20 @@ export default function ProjectScaffoldCalcPage() {
     STANDARD_LENGTHS.map(len => [len, (tatejiPipes[len] ?? 0) + (nunoPipes[len] ?? 0)])
   )
 
+  const pipePrice = (len: number) => materialPrices.find(p => p.category === 'pipe' && p.label === String(len))?.unit_price ?? null
+  const usagePrice = (label: string) => materialPrices.find(p => p.category === 'usage' && p.label === label)?.unit_price ?? null
+  const pipeCostRows = STANDARD_LENGTHS.map(len => ({ len, price: pipePrice(len), count: totalPipes[len] ?? 0 }))
+  const usageCostRows = usageRows
+    .filter(r => r.label)
+    .map(r => ({ label: r.label, price: usagePrice(r.label), count: Number(r.count) || 0 }))
+  const pipeCost = pipeCostRows.reduce((sum, r) => sum + (r.price ?? 0) * r.count, 0)
+  const usageCost = usageCostRows.reduce((sum, r) => sum + (r.price ?? 0) * r.count, 0)
+  const totalCost = pipeCost + usageCost
+  const hasUnsetPrice =
+    pipeCostRows.some(r => r.count > 0 && r.price === null) || usageCostRows.some(r => r.count > 0 && r.price === null)
+
+  const cornerKinds = classifyCorners(vertices)
+
   function addUsageRow(label = '') {
     setUsageRows(rs => [...rs, { key: nextKey(), label, count: '' }])
   }
@@ -534,37 +572,60 @@ export default function ProjectScaffoldCalcPage() {
                   <button type="button" onClick={resetTraceImage} className="text-xs text-gray-400">画像を変更</button>
                 </div>
 
-                <div className="relative border rounded overflow-hidden" style={{ touchAction: 'none' }}>
-                  <img src={traceImageUrl} alt="図面" draggable={false} className="w-full h-auto block select-none"
-                    onLoad={e => setNaturalSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })} />
-                  {naturalSize && (
-                    <svg ref={svgRef} viewBox={`0 0 ${naturalSize.w} ${naturalSize.h}`} preserveAspectRatio="none"
-                      className="absolute inset-0 w-full h-full"
-                      onClick={handleTraceClick} onPointerMove={handleSvgPointerMove} onPointerUp={handleSvgPointerUp}>
-                      {calibPoints.length === 2 && (
-                        <line x1={calibPoints[0].x} y1={calibPoints[0].y} x2={calibPoints[1].x} y2={calibPoints[1].y}
-                          stroke="#dc2626" strokeWidth={naturalSize.w / 250} />
-                      )}
-                      {calibPoints.map((p, i) => (
-                        <circle key={`c${i}`} cx={p.x} cy={p.y} r={naturalSize.w / 100} fill="#dc2626" stroke="white"
-                          strokeWidth={naturalSize.w / 500}
-                          onPointerDown={e => handlePointDown('calib', i, e)}
-                          onClick={e => e.stopPropagation()} />
-                      ))}
-                      {vertices.length >= 2 && (
-                        <polyline
-                          points={[...vertices, ...(polygonClosed ? [vertices[0]] : [])].map(p => `${p.x},${p.y}`).join(' ')}
-                          fill="none" stroke="#2563eb" strokeWidth={naturalSize.w / 300} />
-                      )}
-                      {vertices.map((p, i) => (
-                        <circle key={`v${i}`} cx={p.x} cy={p.y} r={naturalSize.w / 130} fill="#2563eb" stroke="white"
-                          strokeWidth={naturalSize.w / 500}
-                          onPointerDown={e => handlePointDown('vertex', i, e)}
-                          onClick={e => e.stopPropagation()} />
-                      ))}
-                    </svg>
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={() => setZoomLevel(z => Math.max(1, +(z - 0.5).toFixed(2)))} disabled={zoomLevel <= 1}
+                    className="text-xs w-7 h-7 rounded border border-gray-300 text-gray-600 disabled:opacity-40">－</button>
+                  <span className="text-xs text-gray-500 w-10 text-center">{Math.round(zoomLevel * 100)}%</span>
+                  <button type="button" onClick={() => setZoomLevel(z => Math.min(3, +(z + 0.5).toFixed(2)))} disabled={zoomLevel >= 3}
+                    className="text-xs w-7 h-7 rounded border border-gray-300 text-gray-600 disabled:opacity-40">＋</button>
+                  {zoomLevel > 1 && (
+                    <button type="button" onClick={() => setZoomLevel(1)} className="text-xs text-gray-400">リセット</button>
                   )}
+                  <span className="text-xs text-gray-400 ml-auto">2本指ピンチでも拡大できます</span>
                 </div>
+
+                <div className="relative border rounded overflow-auto" style={{ touchAction: 'pan-x pan-y pinch-zoom', maxHeight: '65vh' }}>
+                  <div className="relative" style={{ width: `${zoomLevel * 100}%` }}>
+                    <img src={traceImageUrl} alt="図面" draggable={false} className="w-full h-auto block select-none"
+                      onLoad={e => setNaturalSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })} />
+                    {naturalSize && (
+                      <svg ref={svgRef} viewBox={`0 0 ${naturalSize.w} ${naturalSize.h}`} preserveAspectRatio="none"
+                        className="absolute inset-0 w-full h-full"
+                        onClick={handleTraceClick} onPointerMove={handleSvgPointerMove} onPointerUp={handleSvgPointerUp}>
+                        {calibPoints.length === 2 && (
+                          <line x1={calibPoints[0].x} y1={calibPoints[0].y} x2={calibPoints[1].x} y2={calibPoints[1].y}
+                            stroke="#dc2626" strokeWidth={naturalSize.w / 250} />
+                        )}
+                        {calibPoints.map((p, i) => (
+                          <circle key={`c${i}`} cx={p.x} cy={p.y} r={naturalSize.w / 100} fill="#dc2626" stroke="white"
+                            strokeWidth={naturalSize.w / 500} style={{ touchAction: 'none' }}
+                            onPointerDown={e => handlePointDown('calib', i, e)}
+                            onClick={e => e.stopPropagation()} />
+                        ))}
+                        {vertices.length >= 2 && (
+                          <polyline
+                            points={[...vertices, ...(polygonClosed ? [vertices[0]] : [])].map(p => `${p.x},${p.y}`).join(' ')}
+                            fill="none" stroke="#2563eb" strokeWidth={naturalSize.w / 300} />
+                        )}
+                        {vertices.map((p, i) => (
+                          <circle key={`v${i}`} cx={p.x} cy={p.y} r={naturalSize.w / 130}
+                            fill={polygonClosed && cornerKinds[i] === 'concave' ? '#f97316' : '#2563eb'} stroke="white"
+                            strokeWidth={naturalSize.w / 500} style={{ touchAction: 'none' }}
+                            onPointerDown={e => handlePointDown('vertex', i, e)}
+                            onClick={e => e.stopPropagation()} />
+                        ))}
+                      </svg>
+                    )}
+                  </div>
+                </div>
+
+                {polygonClosed && (
+                  <p className="text-xs text-gray-500 flex flex-wrap items-center gap-3">
+                    <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-blue-600 inline-block" />出隅</span>
+                    <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-orange-500 inline-block" />入隅</span>
+                    <span className="text-gray-400">（表示のみ。本数計算には反映されません）</span>
+                  </p>
+                )}
 
                 {traceSubMode === 'calibrate' ? (
                   <div className="flex flex-col gap-2">
@@ -747,6 +808,35 @@ export default function ProjectScaffoldCalcPage() {
           <p className="text-xs text-gray-400 mt-3">
             建地は辺（または全体）の高さを規格長で継いだ場合の内訳、布は1本あたりスパン間隔{span || 0}mに収まる規格1本の内訳です。
           </p>
+        </div>
+      )}
+
+      {hasResult && (
+        <div className="bg-white rounded-lg shadow p-4 mt-4">
+          <h2 className="font-bold mb-3 text-gray-700">資材コスト（概算）</h2>
+          <div className="flex flex-col gap-1">
+            {pipeCostRows.map(r => (
+              <div key={r.len} className="flex justify-between items-center text-sm py-1 border-b last:border-0">
+                <span>単管{r.len}m（{r.count}本）</span>
+                <span>{r.price !== null ? `${(r.price * r.count).toLocaleString()}円` : '単価未設定'}</span>
+              </div>
+            ))}
+            {usageCostRows.map(r => (
+              <div key={r.label} className="flex justify-between items-center text-sm py-1 border-b last:border-0">
+                <span>{r.label}（{r.count}本）</span>
+                <span>{r.price !== null ? `${(r.price * r.count).toLocaleString()}円` : '単価未設定'}</span>
+              </div>
+            ))}
+            <div className="flex justify-between items-center text-sm py-2 mt-1">
+              <span className="text-gray-600 font-medium">合計（概算）</span>
+              <span className="font-bold text-gray-900">{totalCost.toLocaleString()}円</span>
+            </div>
+          </div>
+          {hasUnsetPrice && (
+            <p className="text-xs text-gray-400 mt-2">
+              単価未設定の項目は0円として合計しています。単価は<Link href="/master" className="text-blue-600">マスタ管理 &gt; 足場材料単価</Link>で設定できます。
+            </p>
+          )}
         </div>
       )}
 

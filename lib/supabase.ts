@@ -212,6 +212,15 @@ export type ScaffoldSegment = {
   vertex_y_px: number | null
 }
 
+export type ScaffoldMaterialPrice = {
+  id: number
+  category: 'pipe' | 'usage'
+  label: string
+  unit_price: number | null
+  sort_order: number
+  created_at: string
+}
+
 export type CompanySettings = {
   id: number
   name: string
