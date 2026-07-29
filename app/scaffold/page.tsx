@@ -9,11 +9,11 @@ type Side = { label: string; length: number; height: number }
 type SideResult = Side & { spanCount: number; levelCount: number; tateji: number; nuno: number }
 
 // 単管の規格長（大きい順）
-const STANDARD_LENGTHS = [4, 3, 2, 1]
+const STANDARD_LENGTHS = [6, 4, 3, 2, 1]
 const USAGE_PRESETS = ['筋交い', '手すり', '幅木', 'ジョイント', 'ベース金具']
 
 // 対象の部材1本分を規格長の単管で構成した場合の本数内訳を返す
-// ・規格長の最大値以下に収まる場合は、それ以上の規格を1本選ぶ（短い部材を継ぐのは非現実的なため）
+// ・規格長の最大値以下に収まる場合は、長い単管を優先し、最大長の規格を1本選ぶ（短い部材を継ぐのは非現実的なため）
 // ・規格長の最大値を超える場合は、大きい規格から順に継ぎ足す
 function pipeBreakdown(target: number, lengths: number[]): Record<number, number> {
   if (target <= 0) return {}
@@ -21,8 +21,7 @@ function pipeBreakdown(target: number, lengths: number[]): Record<number, number
   const maxLen = descending[0]
 
   if (target <= maxLen) {
-    const chosen = [...descending].reverse().find(l => l >= target - 1e-9) ?? maxLen
-    return { [chosen]: 1 }
+    return { [maxLen]: 1 }
   }
 
   let remaining = target
@@ -293,7 +292,7 @@ export default function ScaffoldCalcPage() {
 
       {hasResult && (
         <div className="bg-white rounded-lg shadow p-4 mt-4">
-          <h2 className="font-bold mb-3 text-gray-700">単管の長さ別本数（4m・3m・2m・1m）</h2>
+          <h2 className="font-bold mb-3 text-gray-700">単管の長さ別本数（6m・4m・3m・2m・1m）</h2>
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr className="border-b">
