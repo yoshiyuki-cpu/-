@@ -19,6 +19,9 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   useEffect(() => { loadProjects() }, [])
 
@@ -59,6 +62,20 @@ export default function HomePage() {
 
     setProjects(withTotals)
     setLoading(false)
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return
+    setDeleting(true)
+    setDeleteError('')
+    const { error } = await supabase.from('projects').delete().eq('id', deleteTarget.id)
+    setDeleting(false)
+    if (error) {
+      setDeleteError('削除に失敗しました。' + error.message)
+      return
+    }
+    setDeleteTarget(null)
+    loadProjects()
   }
 
   const fmt = (n: number) => n.toLocaleString('ja-JP') + '円'
@@ -129,9 +146,14 @@ export default function HomePage() {
                     <p className="text-sm text-gray-500">{p.start_date} 〜 {p.end_date ?? '進行中'}</p>
                     {p.location && <p className="text-xs text-gray-400 mt-0.5">📍 {p.location}</p>}
                   </div>
-                  <span className={`text-xs px-2 py-1 rounded-full shrink-0 ${p.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                    {p.status === 'active' ? '進行中' : '完了'}
-                  </span>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <span className={`text-xs px-2 py-1 rounded-full ${p.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                      {p.status === 'active' ? '進行中' : '完了'}
+                    </span>
+                    <button type="button"
+                      onClick={e => { e.preventDefault(); e.stopPropagation(); setDeleteError(''); setDeleteTarget({ id: p.id, name: p.name }) }}
+                      className="text-xs text-gray-300 hover:text-red-400 px-1">削除</button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-1 text-sm mt-2">
                   <div className="text-gray-600">廃材処分費</div><div className="text-right font-medium text-red-600">{fmt(p.waste_cost)}</div>
@@ -154,6 +176,30 @@ export default function HomePage() {
           )
         })}
       </div>
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
+            <h3 className="font-bold text-lg mb-2">現場を削除しますか？</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              <span className="font-medium text-gray-900">{deleteTarget.name}</span> を削除します。<br />
+              この現場に紐づく廃材・経費・見積り・足場計算・議事録などの記録もすべて削除され、元に戻せません。
+              重複して作成した現場や、テストで作った現場を消すときのみ使ってください。
+            </p>
+            {deleteError && <p className="text-sm text-red-600 mb-3">{deleteError}</p>}
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteTarget(null)}
+                className="flex-1 py-2 border rounded-lg text-gray-600 font-medium">
+                キャンセル
+              </button>
+              <button onClick={confirmDelete} disabled={deleting}
+                className="flex-1 py-2 bg-red-600 text-white rounded-lg font-medium disabled:opacity-50">
+                {deleting ? '削除中...' : '削除する'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
