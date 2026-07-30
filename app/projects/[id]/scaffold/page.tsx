@@ -9,6 +9,7 @@ type UsageRow = { key: string; label: string; count: string }
 type Side = { label: string; length: number; height: number }
 type SideResult = Side & { spanCount: number; levelCount: number; tateji: number; nuno: number }
 type Point = { x: number; y: number }
+type Wall = { length: string; turn: 'straight' | 'left' | 'right' | 'custom'; angle: string }
 
 // 単管の規格長（大きい順）
 const STANDARD_LENGTHS = [6, 4, 3, 2, 1]
@@ -77,6 +78,60 @@ function classifyCorners(vertices: Point[]): ('convex' | 'concave')[] {
   })
 }
 
+function wallTurnDeg(wall: Wall): number {
+  if (wall.turn === 'straight') return 0
+  if (wall.turn === 'right') return 90
+  if (wall.turn === 'left') return -90
+  return Number(wall.angle) || 0
+}
+
+// 壁（長さ・曲がる角度）のリストから、正しい縮尺で描いた頂点座標（キャンバスにフィットしたpx座標）を計算する。
+// 実測値をそのまま積み上げていくので、上空図面が無くても実寸に沿った図面を自分で作れる
+function wallsToVertices(walls: Wall[], canvasW = 1000, canvasH = 1000, padding = 100): Point[] {
+  if (walls.length === 0) return []
+  let heading = 0
+  let x = 0, y = 0
+  const metersPts: Point[] = [{ x, y }]
+  walls.forEach((w, i) => {
+    if (i > 0) heading += wallTurnDeg(w)
+    const rad = heading * Math.PI / 180
+    x += (Number(w.length) || 0) * Math.cos(rad)
+    y += (Number(w.length) || 0) * Math.sin(rad)
+    metersPts.push({ x, y })
+  })
+  const corners = metersPts.slice(0, -1)
+  const xs = corners.map(p => p.x), ys = corners.map(p => p.y)
+  const minX = Math.min(...xs), maxX = Math.max(...xs)
+  const minY = Math.min(...ys), maxY = Math.max(...ys)
+  const bboxW = Math.max(maxX - minX, 0.01)
+  const bboxH = Math.max(maxY - minY, 0.01)
+  const scale = Math.min((canvasW - padding * 2) / bboxW, (canvasH - padding * 2) / bboxH)
+  const offsetX = (canvasW - bboxW * scale) / 2 - minX * scale
+  const offsetY = (canvasH - bboxH * scale) / 2 - minY * scale
+  return corners.map(p => ({ x: p.x * scale + offsetX, y: p.y * scale + offsetY }))
+}
+
+// 保存済みの頂点座標・辺の長さから、壁の長さ・曲がる角度のリストを復元する（画像なしトレースの再編集用）。
+// 縮尺変換は拡大・平行移動のみ（回転なし）なので、隣り合う辺の角度差はそのまま壁の「曲がる角度」として復元できる
+function verticesToWalls(vertices: Point[], lengths: number[]): Wall[] {
+  const n = vertices.length
+  if (n < 2) return []
+  const headings = vertices.map((v, i) => {
+    const next = vertices[(i + 1) % n]
+    return Math.atan2(next.y - v.y, next.x - v.x) * 180 / Math.PI
+  })
+  return headings.map((heading, i) => {
+    const length = String(lengths[i] ?? 0)
+    if (i === 0) return { length, turn: 'straight', angle: '0' }
+    let diff = heading - headings[i - 1]
+    diff = ((diff + 180) % 360 + 360) % 360 - 180
+    if (Math.abs(diff) < 1) return { length, turn: 'straight', angle: '0' }
+    if (Math.abs(diff - 90) < 1) return { length, turn: 'right', angle: '90' }
+    if (Math.abs(diff + 90) < 1) return { length, turn: 'left', angle: '-90' }
+    return { length, turn: 'custom', angle: String(Math.round(diff)) }
+  })
+}
+
 // スマホカメラの写真は数MB〜十数MBあり、そのままアップロードするとモバイルブラウザが重くなるため
 // 送信前に縮小・JPEG化する（他画面のresizeImageToBase64と同じ考え方でBlobを返す版）
 function resizeImageToBlob(file: File, maxDim = 1600, quality = 0.8): Promise<Blob> {
@@ -141,10 +196,10 @@ export default function ProjectScaffoldCalcPage() {
   const [calibPoints, setCalibPoints] = useState<Point[]>([])
   const [calibLengthInput, setCalibLengthInput] = useState('')
   const [scaleMPerPx, setScaleMPerPx] = useState<number | null>(null)
-  const [vertices, setVertices] = useState<Point[]>([])
+  const [tapVertices, setTapVertices] = useState<Point[]>([])
+  const [wallInputs, setWallInputs] = useState<Wall[]>([])
   const [polygonClosed, setPolygonClosed] = useState(false)
   const [segmentHeights, setSegmentHeights] = useState<string[]>([])
-  const [segmentLengths, setSegmentLengths] = useState<string[]>([])
   const [traceNoImage, setTraceNoImage] = useState(false)
   const [dragTarget, setDragTarget] = useState<{ kind: 'calib' | 'vertex'; index: number } | null>(null)
   const [zoomLevel, setZoomLevel] = useState(1)
@@ -156,6 +211,13 @@ export default function ProjectScaffoldCalcPage() {
   const span = Number(spanInterval) || 0
   const level = Number(levelHeight) || 0
   const h = Number(height) || 0
+
+  // 画像なしトレースでは、直前の壁の長さが未入力のうちは以降を計算に含めない（曲がる方向のズレを防ぐため）
+  const validWalls = (() => {
+    const idx = wallInputs.findIndex(w => !(Number(w.length) > 0))
+    return idx === -1 ? wallInputs : wallInputs.slice(0, idx)
+  })()
+  const vertices = traceNoImage ? wallsToVertices(validWalls) : tapVertices
 
   useEffect(() => { load() }, [id])
 
@@ -203,12 +265,15 @@ export default function ProjectScaffoldCalcPage() {
         setScaleMPerPx(scaffoldPlan.scale_m_per_px)
         const noImage = !scaffoldPlan.image_url
         setTraceNoImage(noImage)
-        if (noImage) setNaturalSize({ w: 1000, h: 1000 })
         const pts = segments.map(s => ({ x: Number(s.vertex_x_px) || 0, y: Number(s.vertex_y_px) || 0 }))
-        setVertices(pts)
+        const lengths = segments.map(s => Number(s.length_m) || 0)
+        if (noImage) {
+          setWallInputs(pts.length >= 2 ? verticesToWalls(pts, lengths) : [])
+        } else {
+          setTapVertices(pts)
+        }
         setPolygonClosed(pts.length >= 3)
         setSegmentHeights(segments.map(s => String(s.height_m)))
-        setSegmentLengths(segments.map(s => String(s.length_m)))
         setTraceSubMode('trace')
       }
     }
@@ -274,7 +339,7 @@ export default function ProjectScaffoldCalcPage() {
         : vertices.map((v, i) => ({
             label: `seg${i}`,
             length_m: traceNoImage
-              ? Number(segmentLengths[i]) || 0
+              ? Number(validWalls[i]?.length) || 0
               : scaleMPerPx ? dist(v, vertices[(i + 1) % vertices.length]) * scaleMPerPx : 0,
             height_m: Number(segmentHeights[i]) || 0,
             vertex_x_px: v.x,
@@ -306,7 +371,7 @@ export default function ProjectScaffoldCalcPage() {
   }
 
   function handleTraceClick(e: React.MouseEvent<SVGSVGElement>) {
-    if ((!traceImageUrl && !traceNoImage) || !naturalSize) return
+    if (traceNoImage || !traceImageUrl || !naturalSize) return
     const pt = pointFromClientXY(e.clientX, e.clientY)
     if (!pt) return
     if (traceSubMode === 'calibrate') {
@@ -314,7 +379,7 @@ export default function ProjectScaffoldCalcPage() {
       setCalibPoints(cp => [...cp, pt])
     } else {
       if (polygonClosed) return
-      setVertices(vs => [...vs, pt])
+      setTapVertices(vs => [...vs, pt])
     }
   }
 
@@ -331,7 +396,7 @@ export default function ProjectScaffoldCalcPage() {
     if (dragTarget.kind === 'calib') {
       setCalibPoints(cp => cp.map((p, i) => (i === dragTarget.index ? pt : p)))
     } else {
-      setVertices(vs => vs.map((p, i) => (i === dragTarget.index ? pt : p)))
+      setTapVertices(vs => vs.map((p, i) => (i === dragTarget.index ? pt : p)))
     }
   }
 
@@ -359,14 +424,16 @@ export default function ProjectScaffoldCalcPage() {
   }
 
   function undoVertex() {
-    if (!polygonClosed) setVertices(vs => vs.slice(0, -1))
+    if (polygonClosed) return
+    if (traceNoImage) setWallInputs(ws => ws.slice(0, -1))
+    else setTapVertices(vs => vs.slice(0, -1))
   }
 
   function clearVertices() {
-    setVertices([])
+    if (traceNoImage) setWallInputs([])
+    else setTapVertices([])
     setPolygonClosed(false)
     setSegmentHeights([])
-    setSegmentLengths([])
   }
 
   function closePolygon() {
@@ -376,7 +443,6 @@ export default function ProjectScaffoldCalcPage() {
     }
     setPolygonClosed(true)
     setSegmentHeights(vertices.map((_, i) => segmentHeights[i] ?? ''))
-    setSegmentLengths(vertices.map((_, i) => segmentLengths[i] ?? ''))
   }
 
   function resetTraceImage() {
@@ -386,17 +452,30 @@ export default function ProjectScaffoldCalcPage() {
     setCalibPoints([])
     setCalibLengthInput('')
     setScaleMPerPx(null)
-    setVertices([])
+    setTapVertices([])
+    setWallInputs([])
     setPolygonClosed(false)
     setSegmentHeights([])
-    setSegmentLengths([])
     setTraceSubMode('calibrate')
   }
 
   function startNoImageTrace() {
     setTraceNoImage(true)
-    setNaturalSize({ w: 1000, h: 1000 })
     setTraceSubMode('trace')
+    setWallInputs([{ length: '', turn: 'straight', angle: '0' }])
+  }
+
+  function addWall() {
+    setWallInputs(ws => {
+      if (ws.length > 0 && !(Number(ws[ws.length - 1].length) > 0)) return ws
+      return [...ws, { length: '', turn: 'right', angle: '90' }]
+    })
+  }
+  function updateWall(index: number, patch: Partial<Wall>) {
+    setWallInputs(ws => ws.map((w, i) => i === index ? { ...w, ...patch } : w))
+  }
+  function removeWall(index: number) {
+    setWallInputs(ws => ws.filter((_, i) => i !== index))
   }
 
   async function handleTraceImageUpload(file: File) {
@@ -425,7 +504,7 @@ export default function ProjectScaffoldCalcPage() {
     ? vertices.map((v, i) => ({
         label: `区間${i + 1}`,
         length: traceNoImage
-          ? Number(segmentLengths[i]) || 0
+          ? Number(validWalls[i]?.length) || 0
           : dist(v, vertices[(i + 1) % vertices.length]) * (scaleMPerPx as number),
         height: Number(segmentHeights[i]) || 0,
       }))
@@ -481,8 +560,15 @@ export default function ProjectScaffoldCalcPage() {
 
   const cornerKinds = classifyCorners(vertices)
 
-  function addUsageRow(label = '') {
-    setUsageRows(rs => [...rs, { key: nextKey(), label, count: '' }])
+  // ベース金具は建地と同数、幅木・手すりは布と同数を初期値として提案する（現場でそのまま変更可能）
+  const usagePresetDefaultCount: Record<string, string> = {
+    'ベース金具': tatejiCount > 0 ? String(tatejiCount) : '',
+    '幅木': nunoCount > 0 ? String(nunoCount) : '',
+    '手すり': nunoCount > 0 ? String(nunoCount) : '',
+  }
+
+  function addUsageRow(label = '', count = '') {
+    setUsageRows(rs => [...rs, { key: nextKey(), label, count }])
   }
   function updateUsageRow(key: string, patch: Partial<UsageRow>) {
     setUsageRows(rs => rs.map(r => r.key === key ? { ...r, ...patch } : r))
@@ -577,7 +663,7 @@ export default function ProjectScaffoldCalcPage() {
           <div className="flex flex-col gap-3">
             {!traceImageUrl && !traceNoImage ? (
               <div className="flex flex-col gap-2">
-                <p className="text-sm text-gray-500">図面（上空図面・平面図など）の写真を用意してください。写真がなければ、自分で図を描いて拾い出すこともできます。</p>
+                <p className="text-sm text-gray-500">図面（上空図面・平面図など）の写真を用意してください。写真が無ければ、実測した寸法を入力しながら簡単な図面を自分で作ることもできます。</p>
                 {project?.aerial_photo_url && (
                   <button type="button" onClick={() => setTraceImageUrl(project.aerial_photo_url)}
                     className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium">
@@ -592,20 +678,147 @@ export default function ProjectScaffoldCalcPage() {
                   onChange={e => { const f = e.target.files?.[0]; if (f) handleTraceImageUpload(f) }} />
                 <button type="button" onClick={startNoImageTrace}
                   className="text-sm text-gray-600 underline text-left">
-                  写真を使わず、自分で図を描いて拾い出す
+                  写真を使わず、寸法を入力して図面を作る
                 </button>
               </div>
+            ) : traceNoImage ? (
+              <>
+                <div className="flex justify-between items-center">
+                  <p className="text-sm font-medium text-gray-700">
+                    {polygonClosed ? '② 区間ごとの高さを入力' : '① 壁の長さと曲がる方向を入力'}
+                  </p>
+                  <button type="button" onClick={resetTraceImage} className="text-xs text-gray-400">やり直す</button>
+                </div>
+
+                {vertices.length >= 2 && (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={() => setZoomLevel(z => Math.max(1, +(z - 0.5).toFixed(2)))} disabled={zoomLevel <= 1}
+                        className="text-xs w-7 h-7 rounded border border-gray-300 text-gray-600 disabled:opacity-40">－</button>
+                      <span className="text-xs text-gray-500 w-10 text-center">{Math.round(zoomLevel * 100)}%</span>
+                      <button type="button" onClick={() => setZoomLevel(z => Math.min(3, +(z + 0.5).toFixed(2)))} disabled={zoomLevel >= 3}
+                        className="text-xs w-7 h-7 rounded border border-gray-300 text-gray-600 disabled:opacity-40">＋</button>
+                      {zoomLevel > 1 && (
+                        <button type="button" onClick={() => setZoomLevel(1)} className="text-xs text-gray-400">リセット</button>
+                      )}
+                      <span className="text-xs text-gray-400 ml-auto">入力した寸法から自動で図が描かれます</span>
+                    </div>
+
+                    <div className="relative border rounded overflow-auto bg-gray-50" style={{ touchAction: 'pan-x pan-y pinch-zoom', maxHeight: '50vh' }}>
+                      <div className="relative" style={{ width: `${zoomLevel * 100}%`, aspectRatio: '1 / 1' }}>
+                        <svg viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid meet" className="absolute inset-0 w-full h-full">
+                          <defs>
+                            <pattern id="scaffold-grid" width="50" height="50" patternUnits="userSpaceOnUse">
+                              <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#e5e7eb" strokeWidth="1" />
+                            </pattern>
+                          </defs>
+                          <rect width="1000" height="1000" fill="url(#scaffold-grid)" />
+                          <polyline
+                            points={[...vertices, ...(polygonClosed ? [vertices[0]] : [])].map(p => `${p.x},${p.y}`).join(' ')}
+                            fill="none" stroke="#2563eb" strokeWidth="4" />
+                          {!polygonClosed && (
+                            <line x1={vertices[vertices.length - 1].x} y1={vertices[vertices.length - 1].y} x2={vertices[0].x} y2={vertices[0].y}
+                              stroke="#93c5fd" strokeDasharray="10 8" strokeWidth="3" />
+                          )}
+                          {vertices.map((p, i) => (
+                            <circle key={`v${i}`} cx={p.x} cy={p.y} r="8"
+                              fill={polygonClosed && cornerKinds[i] === 'concave' ? '#f97316' : '#2563eb'} stroke="white" strokeWidth="2" />
+                          ))}
+                        </svg>
+                      </div>
+                    </div>
+
+                    {polygonClosed && (
+                      <p className="text-xs text-gray-500 flex flex-wrap items-center gap-3">
+                        <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-blue-600 inline-block" />出隅</span>
+                        <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-orange-500 inline-block" />入隅</span>
+                        <span className="text-gray-400">（表示のみ。本数計算には反映されません）</span>
+                      </p>
+                    )}
+                  </>
+                )}
+
+                {!polygonClosed ? (
+                  <div className="flex flex-col gap-3">
+                    <p className="text-xs text-gray-500">
+                      建物の壁を1辺ずつ、実測した長さと（2辺目以降は）前の壁からの曲がる方向で入力してください。入力するたびに上に図が描かれます。
+                    </p>
+                    {wallInputs.map((w, i) => (
+                      <div key={i} className="border rounded p-3">
+                        <div className="flex justify-between items-center mb-2">
+                          <p className="text-sm font-medium">
+                            壁{i + 1}{i === 0 && <span className="text-xs text-gray-400 ml-1">（起点）</span>}
+                          </p>
+                          <button type="button" onClick={() => removeWall(i)} className="text-gray-300 hover:text-red-400 text-xs">削除</button>
+                        </div>
+                        {i > 0 && (
+                          <div className="mb-2">
+                            <label className="block text-xs text-gray-500 mb-1">この壁を描く前に曲がる方向</label>
+                            <div className="grid grid-cols-4 gap-1">
+                              {([
+                                ['straight', 'そのまま'],
+                                ['right', '右へ90°'],
+                                ['left', '左へ90°'],
+                                ['custom', '自由入力'],
+                              ] as const).map(([v, label]) => (
+                                <button key={v} type="button" onClick={() => updateWall(i, { turn: v })}
+                                  className={`py-1.5 rounded border text-xs font-medium ${w.turn === v ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600'}`}>
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                            {w.turn === 'custom' && (
+                              <input type="number" inputMode="decimal" step="1" className={`${inputClass} mt-2`}
+                                value={w.angle} onChange={e => updateWall(i, { angle: e.target.value })}
+                                placeholder="曲がる角度（度）" />
+                            )}
+                            {w.turn === 'custom' && <p className="text-xs text-gray-400 mt-1">＋で右、－で左に曲がります</p>}
+                          </div>
+                        )}
+                        <label className="block text-xs text-gray-500 mb-1">長さ（m）</label>
+                        <input type="number" inputMode="decimal" step="0.1" className={inputClass}
+                          value={w.length} onChange={e => updateWall(i, { length: e.target.value })} placeholder="0" />
+                      </div>
+                    ))}
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={addWall} className="text-blue-600 text-sm font-medium">+ 次の壁を追加</button>
+                      <button type="button" onClick={undoVertex} disabled={wallInputs.length === 0}
+                        className="text-xs px-3 py-1 rounded border border-gray-300 text-gray-600 disabled:opacity-40 ml-auto">末尾を削除</button>
+                      <button type="button" onClick={clearVertices} disabled={wallInputs.length === 0}
+                        className="text-xs px-3 py-1 rounded border border-gray-300 text-gray-600 disabled:opacity-40">クリア</button>
+                      {vertices.length >= 3 && (
+                        <button type="button" onClick={closePolygon}
+                          className="text-xs px-3 py-1 rounded bg-blue-600 text-white font-medium">この形で確定</button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-3">
+                    <button type="button" onClick={() => setPolygonClosed(false)}
+                      className="text-xs px-3 py-1 rounded border border-blue-600 text-blue-600 self-start">壁を編集</button>
+                    <p className="text-sm font-medium text-gray-700">区間ごとの高さ</p>
+                    {traceSides.map((s, i) => (
+                      <div key={i} className="border rounded p-3">
+                        <p className="text-sm font-medium mb-2">{s.label}（{s.length.toFixed(1)}m）</p>
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">高さ（m）</label>
+                          <input type="number" inputMode="decimal" step="0.1" className={inputClass}
+                            value={segmentHeights[i] ?? ''}
+                            onChange={e => setSegmentHeights(hs => hs.map((v, j) => j === i ? e.target.value : v))}
+                            placeholder="0" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
             ) : (
               <>
                 <div className="flex justify-between items-center">
                   <p className="text-sm font-medium text-gray-700">
-                    {traceNoImage
-                      ? '建物の輪郭を描く（実寸は後で入力します）'
-                      : traceSubMode === 'calibrate' ? '① スケール校正' : '② 建物の輪郭をなぞる'}
+                    {traceSubMode === 'calibrate' ? '① スケール校正' : '② 建物の輪郭をなぞる'}
                   </p>
-                  <button type="button" onClick={resetTraceImage} className="text-xs text-gray-400">
-                    {traceNoImage ? 'やり直す' : '画像を変更'}
-                  </button>
+                  <button type="button" onClick={resetTraceImage} className="text-xs text-gray-400">画像を変更</button>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -622,31 +835,17 @@ export default function ProjectScaffoldCalcPage() {
 
                 <div className="relative border rounded overflow-auto" style={{ touchAction: 'pan-x pan-y pinch-zoom', maxHeight: '65vh' }}>
                   <div className="relative" style={{ width: `${zoomLevel * 100}%` }}>
-                    {traceImageUrl ? (
-                      <img src={traceImageUrl} alt="図面" draggable={false} className="w-full h-auto block select-none"
-                        onLoad={e => setNaturalSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })} />
-                    ) : (
-                      <div className="w-full bg-gray-50" style={{ aspectRatio: '1 / 1' }} />
-                    )}
+                    <img src={traceImageUrl ?? undefined} alt="図面" draggable={false} className="w-full h-auto block select-none"
+                      onLoad={e => setNaturalSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })} />
                     {naturalSize && (
                       <svg ref={svgRef} viewBox={`0 0 ${naturalSize.w} ${naturalSize.h}`} preserveAspectRatio="none"
                         className="absolute inset-0 w-full h-full"
                         onClick={handleTraceClick} onPointerMove={handleSvgPointerMove} onPointerUp={handleSvgPointerUp}>
-                        {traceNoImage && (
-                          <>
-                            <defs>
-                              <pattern id="scaffold-grid" width={naturalSize.w / 20} height={naturalSize.h / 20} patternUnits="userSpaceOnUse">
-                                <path d={`M ${naturalSize.w / 20} 0 L 0 0 0 ${naturalSize.h / 20}`} fill="none" stroke="#e5e7eb" strokeWidth={naturalSize.w / 1000} />
-                              </pattern>
-                            </defs>
-                            <rect width={naturalSize.w} height={naturalSize.h} fill="url(#scaffold-grid)" />
-                          </>
-                        )}
-                        {!traceNoImage && calibPoints.length === 2 && (
+                        {calibPoints.length === 2 && (
                           <line x1={calibPoints[0].x} y1={calibPoints[0].y} x2={calibPoints[1].x} y2={calibPoints[1].y}
                             stroke="#dc2626" strokeWidth={naturalSize.w / 250} />
                         )}
-                        {!traceNoImage && calibPoints.map((p, i) => (
+                        {calibPoints.map((p, i) => (
                           <circle key={`c${i}`} cx={p.x} cy={p.y} r={naturalSize.w / 100} fill="#dc2626" stroke="white"
                             strokeWidth={naturalSize.w / 500} style={{ touchAction: 'none' }}
                             onPointerDown={e => handlePointDown('calib', i, e)}
@@ -677,7 +876,7 @@ export default function ProjectScaffoldCalcPage() {
                   </p>
                 )}
 
-                {!traceNoImage && traceSubMode === 'calibrate' ? (
+                {traceSubMode === 'calibrate' ? (
                   <div className="flex flex-col gap-2">
                     <p className="text-xs text-gray-500">
                       現場でメジャー実測できる辺（外壁の1辺など）の両端を図面上でタップしてください（{calibPoints.length}/2点）。
@@ -701,15 +900,11 @@ export default function ProjectScaffoldCalcPage() {
                 ) : (
                   <div className="flex flex-col gap-2">
                     <p className="text-xs text-gray-500">
-                      {traceNoImage
-                        ? `建物の角を順にタップして輪郭を描いてください（${vertices.length}点）。実際の辺の長さは、頂点を確定した後に入力します。`
-                        : `スケール: 1pxあたり${(scaleMPerPx ?? 0).toFixed(4)}m。建物の角を順にタップして輪郭をなぞってください（${vertices.length}点）。`}
+                      スケール: 1pxあたり{(scaleMPerPx ?? 0).toFixed(4)}m。建物の角を順にタップして輪郭をなぞってください（{vertices.length}点）。
                     </p>
                     <div className="flex flex-wrap gap-2">
-                      {!traceNoImage && (
-                        <button type="button" onClick={() => setTraceSubMode('calibrate')}
-                          className="text-xs px-3 py-1 rounded border border-gray-300 text-gray-600">スケールを再校正</button>
-                      )}
+                      <button type="button" onClick={() => setTraceSubMode('calibrate')}
+                        className="text-xs px-3 py-1 rounded border border-gray-300 text-gray-600">スケールを再校正</button>
                       <button type="button" onClick={undoVertex} disabled={vertices.length === 0 || polygonClosed}
                         className="text-xs px-3 py-1 rounded border border-gray-300 text-gray-600 disabled:opacity-40">元に戻す</button>
                       <button type="button" onClick={clearVertices} disabled={vertices.length === 0}
@@ -726,34 +921,7 @@ export default function ProjectScaffoldCalcPage() {
                   </div>
                 )}
 
-                {polygonClosed && traceNoImage && (
-                  <div className="flex flex-col gap-3 mt-1">
-                    <p className="text-sm font-medium text-gray-700">区間ごとの長さ・高さ</p>
-                    {vertices.map((_, i) => (
-                      <div key={i} className="border rounded p-3">
-                        <p className="text-sm font-medium mb-2">区間{i + 1}</p>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-xs text-gray-500 mb-1">長さ（m）</label>
-                            <input type="number" inputMode="decimal" step="0.1" className={inputClass}
-                              value={segmentLengths[i] ?? ''}
-                              onChange={e => setSegmentLengths(ls => ls.map((v, j) => j === i ? e.target.value : v))}
-                              placeholder="0" />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-gray-500 mb-1">高さ（m）</label>
-                            <input type="number" inputMode="decimal" step="0.1" className={inputClass}
-                              value={segmentHeights[i] ?? ''}
-                              onChange={e => setSegmentHeights(hs => hs.map((v, j) => j === i ? e.target.value : v))}
-                              placeholder="0" />
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {polygonClosed && !traceNoImage && (
+                {polygonClosed && (
                   <div className="flex flex-col gap-3 mt-1">
                     <p className="text-sm font-medium text-gray-700">区間ごとの高さ</p>
                     {traceSides.map((s, i) => (
@@ -923,9 +1091,12 @@ export default function ProjectScaffoldCalcPage() {
 
       <div className="bg-white rounded-lg shadow p-4 mt-4">
         <h2 className="font-bold mb-3 text-gray-700">用途別本数（手入力）</h2>
+        <p className="text-xs text-gray-400 mb-3">
+          ベース金具は建地本数、幅木・手すりは布本数を初期値として入力しています（現場に合わせて変更してください）。
+        </p>
         <div className="flex flex-wrap gap-2 mb-3">
           {USAGE_PRESETS.map(p => (
-            <button key={p} type="button" onClick={() => addUsageRow(p)}
+            <button key={p} type="button" onClick={() => addUsageRow(p, usagePresetDefaultCount[p] ?? '')}
               className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-xs">+ {p}</button>
           ))}
         </div>

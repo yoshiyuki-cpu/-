@@ -133,8 +133,15 @@ export default function ScaffoldCalcPage() {
   const hasUnsetPrice =
     pipeCostRows.some(r => r.count > 0 && r.price === null) || usageCostRows.some(r => r.count > 0 && r.price === null)
 
-  function addUsageRow(label = '') {
-    setUsageRows(rs => [...rs, { key: nextKey(), label, count: '' }])
+  // ベース金具は建地と同数、幅木・手すりは布と同数を初期値として提案する（現場でそのまま変更可能）
+  const usagePresetDefaultCount: Record<string, string> = {
+    'ベース金具': tatejiCount > 0 ? String(tatejiCount) : '',
+    '幅木': nunoCount > 0 ? String(nunoCount) : '',
+    '手すり': nunoCount > 0 ? String(nunoCount) : '',
+  }
+
+  function addUsageRow(label = '', count = '') {
+    setUsageRows(rs => [...rs, { key: nextKey(), label, count }])
   }
   function updateUsageRow(key: string, patch: Partial<UsageRow>) {
     setUsageRows(rs => rs.map(r => r.key === key ? { ...r, ...patch } : r))
@@ -353,9 +360,12 @@ export default function ScaffoldCalcPage() {
 
       <div className="bg-white rounded-lg shadow p-4 mt-4">
         <h2 className="font-bold mb-3 text-gray-700">用途別本数（手入力）</h2>
+        <p className="text-xs text-gray-400 mb-3">
+          ベース金具は建地本数、幅木・手すりは布本数を初期値として入力しています（現場に合わせて変更してください）。
+        </p>
         <div className="flex flex-wrap gap-2 mb-3">
           {USAGE_PRESETS.map(p => (
-            <button key={p} type="button" onClick={() => addUsageRow(p)}
+            <button key={p} type="button" onClick={() => addUsageRow(p, usagePresetDefaultCount[p] ?? '')}
               className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-xs">+ {p}</button>
           ))}
         </div>
