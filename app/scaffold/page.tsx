@@ -13,15 +13,18 @@ const STANDARD_LENGTHS = [6, 4, 3, 2, 1]
 const USAGE_PRESETS = ['筋交い', '手すり', '幅木', 'ジョイント', 'ベース金具']
 
 // 対象の部材1本分を規格長の単管で構成した場合の本数内訳を返す
-// ・規格長の最大値以下に収まる場合は、長い単管を優先し、最大長の規格を1本選ぶ（短い部材を継ぐのは非現実的なため）
-// ・規格長の最大値を超える場合は、大きい規格から順に継ぎ足す
-function pipeBreakdown(target: number, lengths: number[]): Record<number, number> {
+// ・規格長の最大値以下に収まる場合、preferLongestがtrueなら長い単管を優先して最大長の規格を1本選ぶ（建地向け。短い部材を継ぐのは非現実的なため）。
+//   falseならこれまで通り無駄の少ない最小の規格を1本選ぶ（布向け。スパン間隔ちょうどの短い単管で足りるのに長尺を使うと過剰になるため）
+// ・規格長の最大値を超える場合は、大きい規格から順に継ぎ足す（両方共通）
+function pipeBreakdown(target: number, lengths: number[], preferLongest: boolean): Record<number, number> {
   if (target <= 0) return {}
   const descending = [...lengths].sort((a, b) => b - a)
   const maxLen = descending[0]
 
   if (target <= maxLen) {
-    return { [maxLen]: 1 }
+    if (preferLongest) return { [maxLen]: 1 }
+    const chosen = [...descending].reverse().find(l => l >= target - 1e-9) ?? maxLen
+    return { [chosen]: 1 }
   }
 
   let remaining = target
@@ -107,11 +110,11 @@ export default function ScaffoldCalcPage() {
   const nunoCount = sideResults.reduce((sum, s) => sum + s.nuno, 0)
 
   const tatejiPipes = sideResults.reduce(
-    (acc, s) => addPipeCounts(acc, scalePipeCounts(pipeBreakdown(s.height, STANDARD_LENGTHS), s.tateji)),
+    (acc, s) => addPipeCounts(acc, scalePipeCounts(pipeBreakdown(s.height, STANDARD_LENGTHS, true), s.tateji)),
     {} as Record<number, number>,
   )
   const nunoPipes = sideResults.reduce(
-    (acc, s) => addPipeCounts(acc, scalePipeCounts(pipeBreakdown(span, STANDARD_LENGTHS), s.nuno)),
+    (acc, s) => addPipeCounts(acc, scalePipeCounts(pipeBreakdown(span, STANDARD_LENGTHS, false), s.nuno)),
     {} as Record<number, number>,
   )
   const totalPipes = Object.fromEntries(
