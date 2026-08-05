@@ -179,7 +179,8 @@ export default function ProjectDetailPage() {
   async function toggleStatus() {
     if (!project) return
     const newStatus = project.status === 'active' ? 'completed' : 'active'
-    await supabase.from('projects').update({ status: newStatus }).eq('id', id)
+    const end_date = newStatus === 'completed' ? new Date().toISOString().split('T')[0] : null
+    await supabase.from('projects').update({ status: newStatus, end_date }).eq('id', id)
     load()
   }
 
