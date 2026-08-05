@@ -46,6 +46,7 @@ export default function EntryPage() {
   const [wasteTypes, setWasteTypes] = useState<WasteType[]>([])
   const [workers, setWorkers] = useState<Worker[]>([])
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
+  const [recordedVehicleIds, setRecordedVehicleIds] = useState<Set<number>>(new Set())
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
   const [receiptError, setReceiptError] = useState<string | null>(null)
@@ -56,23 +57,27 @@ export default function EntryPage() {
   const [workerDayType, setWorkerDayType] = useState<Record<number, DayType>>({})
   const [otherForm, setOtherForm] = useState({
     date: today, unit_price: '', note: '', quantity: '', fuel_type: '' as '' | '軽油' | 'レギュラー',
-    vehicle_category: '' as '' | 'rental' | 'owned', vehicle_id: '', liter_price: '165',
+    vehicle_category: '' as '' | 'rental' | 'owned', vehicle_id: '', liter_price: '165', mobilization_fee: '',
   })
 
   useEffect(() => { loadMaster() }, [])
 
   async function loadMaster() {
-    const [{ data: s }, { data: w }, { data: wk }, { data: v }] = await Promise.all([
+    const [{ data: s }, { data: w }, { data: wk }, { data: v }, { data: le }] = await Promise.all([
       supabase.from('disposal_sites').select('*').order('name'),
       supabase.from('waste_types').select('*, disposal_sites(name)').order('name'),
       supabase.from('workers').select('*').order('name'),
       supabase.from('vehicles').select('*').order('name'),
+      supabase.from('other_entries').select('vehicle_id').eq('project_id', Number(id)).eq('entry_type', 'lease').not('vehicle_id', 'is', null),
     ])
     setSites(s ?? [])
     setWasteTypes((w as any) ?? [])
     setWorkers(wk ?? [])
     setVehicles(v ?? [])
+    setRecordedVehicleIds(new Set(((le ?? []) as { vehicle_id: number }[]).map(e => e.vehicle_id)))
   }
+
+  const isFirstVehicleUse = tab === 'lease' && !!otherForm.vehicle_id && !recordedVehicleIds.has(Number(otherForm.vehicle_id))
 
   function toggleWorker(workerId: number) {
     setWorkerDayType(prev => {
@@ -136,8 +141,10 @@ export default function EntryPage() {
     e.preventDefault()
     const amount = Number(otherForm.unit_price)
     if (!amount) return
+    if (isFirstVehicleUse && !Number(otherForm.mobilization_fee)) return
     setSaving(true)
-    await supabase.from('other_entries').insert({
+    const vehicleId = tab === 'lease' && otherForm.vehicle_id ? Number(otherForm.vehicle_id) : null
+    const rows = [{
       project_id: Number(id),
       entry_type: tab,
       date: otherForm.date,
@@ -146,11 +153,27 @@ export default function EntryPage() {
       amount,
       note: otherForm.note || null,
       fuel_type: tab === 'fuel' ? (otherForm.fuel_type || null) : null,
-      vehicle_id: tab === 'lease' && otherForm.vehicle_id ? Number(otherForm.vehicle_id) : null,
-    })
+      vehicle_id: vehicleId,
+    }]
+    if (isFirstVehicleUse && vehicleId) {
+      const mobilizationAmount = Number(otherForm.mobilization_fee)
+      rows.push({
+        project_id: Number(id),
+        entry_type: tab,
+        date: otherForm.date,
+        quantity: 1,
+        unit_price: mobilizationAmount,
+        amount: mobilizationAmount,
+        note: '回送費',
+        fuel_type: null,
+        vehicle_id: vehicleId,
+      })
+    }
+    await supabase.from('other_entries').insert(rows)
+    if (vehicleId) setRecordedVehicleIds((prev: Set<number>) => new Set(prev).add(vehicleId))
     setSaving(false)
     setSuccess(true)
-    setOtherForm({ date: otherForm.date, unit_price: '', note: '', quantity: '', fuel_type: '', vehicle_category: '', vehicle_id: '', liter_price: '165' })
+    setOtherForm({ date: otherForm.date, unit_price: '', note: '', quantity: '', fuel_type: '', vehicle_category: '', vehicle_id: '', liter_price: '165', mobilization_fee: '' })
     setTimeout(() => setSuccess(false), 2000)
   }
 
@@ -305,7 +328,7 @@ export default function EntryPage() {
                   onChange={e => {
                     const vid = e.target.value
                     const v = vehicles.find(v => String(v.id) === vid)
-                    setOtherForm(f => ({ ...f, vehicle_id: vid, unit_price: v?.default_price ? String(v.default_price) : f.unit_price }))
+                    setOtherForm(f => ({ ...f, vehicle_id: vid, unit_price: v?.default_price ? String(v.default_price) : f.unit_price, mobilization_fee: '' }))
                   }}>
                   <option value="">選択してください</option>
                   {vehicles.filter(v => v.category === otherForm.vehicle_category).map(v => (
@@ -313,6 +336,14 @@ export default function EntryPage() {
                   ))}
                 </select>
               </div>
+              {isFirstVehicleUse && (
+                <div>
+                  <label className="block text-sm font-medium mb-1">回送費（円・この現場でこの重機は初回のため必須）</label>
+                  <input type="number" inputMode="numeric" className="w-full border rounded px-3 py-3 text-base" value={otherForm.mobilization_fee}
+                    onChange={e => setOtherForm({ ...otherForm, mobilization_fee: e.target.value })} placeholder="0" />
+                  <p className="text-xs text-gray-400 mt-1">この現場でこの車両・重機を車両代に記録するのは初めてです。搬入出の回送費を入力してください</p>
+                </div>
+              )}
             </>
           )}
           {tab === 'fuel' && (
@@ -453,7 +484,7 @@ export default function EntryPage() {
             <input className="w-full border rounded px-3 py-3 text-base" value={otherForm.note}
               onChange={e => setOtherForm({ ...otherForm, note: e.target.value })} placeholder="" />
           </div>
-          <button type="submit" disabled={saving || !otherForm.unit_price}
+          <button type="submit" disabled={saving || !otherForm.unit_price || (isFirstVehicleUse && !otherForm.mobilization_fee)}
             className="bg-blue-600 text-white py-3 rounded font-medium disabled:opacity-50 text-base">
             {saving ? '処理中...' : '保存する'}
           </button>
