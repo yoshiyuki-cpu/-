@@ -1,12 +1,12 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { supabase, DisposalSite, WasteType, CompanySettings, Vehicle, ScaffoldMaterialPrice } from '@/lib/supabase'
+import { supabase, DisposalSite, WasteType, CompanySettings, Vehicle, ScaffoldMaterialPrice, FuelPrice } from '@/lib/supabase'
 import Link from 'next/link'
 
 type Worker = { id: number; name: string; company_name: string | null }
 
 export default function MasterPage() {
-  const [tab, setTab] = useState<'disposal' | 'worker' | 'vehicle' | 'scaffold' | 'company'>('disposal')
+  const [tab, setTab] = useState<'disposal' | 'worker' | 'vehicle' | 'scaffold' | 'fuel' | 'company'>('disposal')
   const [sites, setSites] = useState<DisposalSite[]>([])
   const [wasteTypes, setWasteTypes] = useState<(WasteType & { disposal_sites?: DisposalSite })[]>([])
   const [workers, setWorkers] = useState<Worker[]>([])
@@ -14,6 +14,7 @@ export default function MasterPage() {
   const [scaffoldPrices, setScaffoldPrices] = useState<ScaffoldMaterialPrice[]>([])
   const [newScaffoldUsage, setNewScaffoldUsage] = useState('')
   const [editingScaffoldPrice, setEditingScaffoldPrice] = useState<{ id: number; price: string } | null>(null)
+  const [fuelPrices, setFuelPrices] = useState<FuelPrice[]>([])
   const [selectedSiteId, setSelectedSiteId] = useState<string>('')
   const [newSiteName, setNewSiteName] = useState('')
   const [newWaste, setNewWaste] = useState({ name: '', unit: 'kg', unit_price: '', entry_type: 'cost' })
@@ -21,6 +22,7 @@ export default function MasterPage() {
   const [newWorker, setNewWorker] = useState({ name: '', company_name: '' })
   const [newVehicle, setNewVehicle] = useState({ name: '', category: 'rental' as 'rental' | 'owned', default_price: '', unit: '日' })
   const [editingVehiclePrice, setEditingVehiclePrice] = useState<{ id: number; price: string } | null>(null)
+  const [editingFuelPrice, setEditingFuelPrice] = useState<{ id: number; price: string } | null>(null)
   const [company, setCompany] = useState<CompanySettings | null>(null)
   const [savingCompany, setSavingCompany] = useState(false)
   const [uploadingStamp, setUploadingStamp] = useState(false)
@@ -28,12 +30,13 @@ export default function MasterPage() {
   useEffect(() => { loadAll() }, [])
 
   async function loadAll() {
-    const [{ data: s }, { data: w }, { data: wk }, { data: v }, { data: sp }, { data: c }] = await Promise.all([
+    const [{ data: s }, { data: w }, { data: wk }, { data: v }, { data: sp }, { data: fp }, { data: c }] = await Promise.all([
       supabase.from('disposal_sites').select('*').order('name'),
       supabase.from('waste_types').select('*, disposal_sites(name)').order('name'),
       supabase.from('workers').select('*').order('name'),
       supabase.from('vehicles').select('*').order('category').order('name'),
       supabase.from('scaffold_material_prices').select('*').order('category').order('sort_order'),
+      supabase.from('fuel_prices').select('*').order('fuel_type'),
       supabase.from('company_settings').select('*').eq('id', 1).single(),
     ])
     setSites(s ?? [])
@@ -41,6 +44,7 @@ export default function MasterPage() {
     setWorkers(wk ?? [])
     setVehicles(v ?? [])
     setScaffoldPrices(sp ?? [])
+    setFuelPrices(fp ?? [])
     setCompany(c)
   }
 
@@ -61,6 +65,13 @@ export default function MasterPage() {
   async function deleteScaffoldUsagePrice(id: number) {
     if (!confirm('この用途別部材の単価を削除しますか？')) return
     await supabase.from('scaffold_material_prices').delete().eq('id', id)
+    loadAll()
+  }
+
+  async function updateFuelPrice(id: number, price: string) {
+    if (!price) return
+    await supabase.from('fuel_prices').update({ unit_price: Number(price), updated_at: new Date().toISOString() }).eq('id', id)
+    setEditingFuelPrice(null)
     loadAll()
   }
 
@@ -207,6 +218,7 @@ export default function MasterPage() {
         <button className={tabClass('worker')} onClick={() => setTab('worker')}>作業員</button>
         <button className={tabClass('vehicle')} onClick={() => setTab('vehicle')}>車両・重機</button>
         <button className={tabClass('scaffold')} onClick={() => setTab('scaffold')}>足場材料単価</button>
+        <button className={tabClass('fuel')} onClick={() => setTab('fuel')}>燃料単価</button>
         <button className={tabClass('company')} onClick={() => setTab('company')}>会社情報</button>
       </div>
 
@@ -457,6 +469,37 @@ export default function MasterPage() {
                   )}
                   <button onClick={() => deleteScaffoldUsagePrice(p.id)} className="text-gray-300 hover:text-red-400 text-xs">削除</button>
                 </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {tab === 'fuel' && (
+        <section className="bg-white rounded-lg shadow p-4">
+          <h2 className="font-bold mb-3 text-gray-700">燃料単価</h2>
+          <p className="text-xs text-gray-500 mb-3">
+            記録入力の燃料代で種類（軽油／レギュラー）を選ぶと、ここで設定した単価が自動入力されます。相場が変わったらここで基本単価を更新してください。入力時にその場で単価を上書きすることもできます。
+          </p>
+          <div className="flex flex-col gap-1">
+            {fuelPrices.map(fp => (
+              <div key={fp.id} className="flex justify-between items-center text-sm py-2 border-b last:border-0">
+                <span>{fp.fuel_type}</span>
+                {editingFuelPrice?.id === fp.id ? (
+                  <div className="flex items-center gap-1">
+                    <input type="number" inputMode="decimal" step="0.01" className="border rounded px-2 py-1 text-sm w-24"
+                      value={editingFuelPrice.price}
+                      onChange={e => setEditingFuelPrice({ ...editingFuelPrice, price: e.target.value })} />
+                    <span className="text-xs text-gray-500">円/L</span>
+                    <button onClick={() => updateFuelPrice(fp.id, editingFuelPrice.price)} className="text-blue-600 text-xs">✓</button>
+                    <button onClick={() => setEditingFuelPrice(null)} className="text-gray-400 text-xs">✕</button>
+                  </div>
+                ) : (
+                  <button onClick={() => setEditingFuelPrice({ id: fp.id, price: String(fp.unit_price) })}
+                    className="text-sm text-gray-700 hover:text-blue-600">
+                    {fp.unit_price.toLocaleString()}円/L
+                  </button>
+                )}
               </div>
             ))}
           </div>

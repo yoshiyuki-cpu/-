@@ -73,6 +73,13 @@ export type Vehicle = {
   created_at: string
 }
 
+export type FuelPrice = {
+  id: number
+  fuel_type: '軽油' | 'レギュラー'
+  unit_price: number
+  updated_at: string
+}
+
 export type Tool = {
   id: number
   name: string
