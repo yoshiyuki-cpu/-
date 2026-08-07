@@ -210,7 +210,10 @@ export default function MasterPage() {
     <div>
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-xl font-bold">マスタ管理</h1>
-        <Link href="/tools" className="text-sm text-blue-600 border rounded-full px-3 py-1.5">🧰 置き場道具管理</Link>
+        <div className="flex gap-1.5">
+          <Link href="/usage" className="text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">📊 利用状況</Link>
+          <Link href="/tools" className="text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🧰 置き場道具管理</Link>
+        </div>
       </div>
 
       <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1">
