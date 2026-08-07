@@ -181,7 +181,7 @@ export default function EntryPage() {
   }
 
   const tabClass = (t: Tab) =>
-    `flex-1 py-2 text-sm font-medium border-b-2 transition ${tab === t ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500'}`
+    `flex-1 shrink-0 whitespace-nowrap px-3 py-2 rounded-full text-sm font-medium text-center transition ${tab === t ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`
 
   return (
     <div>
@@ -189,10 +189,10 @@ export default function EntryPage() {
       <h1 className="text-xl font-bold mb-4">記録入力</h1>
 
       {success && (
-        <div className="bg-green-100 text-green-700 rounded px-3 py-2 mb-3 text-sm">保存しました ✓</div>
+        <div className="bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl px-3 py-2 mb-3 text-sm font-medium">保存しました ✓</div>
       )}
 
-      <div className="flex mb-4 border-b overflow-x-auto">
+      <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1">
         <button className={tabClass('waste')} onClick={() => setTab('waste')}>廃材</button>
         <button className={tabClass('labor')} onClick={() => setTab('labor')}>人工</button>
         <button className={tabClass('fuel')} onClick={() => setTab('fuel')}>燃料代</button>
@@ -201,15 +201,15 @@ export default function EntryPage() {
       </div>
 
       {tab === 'waste' && (
-        <form onSubmit={saveWaste} className="bg-white rounded-lg shadow p-4 flex flex-col gap-4">
+        <form onSubmit={saveWaste} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex flex-col gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">日付</label>
-            <input type="date" className="w-full border rounded px-3 py-3 text-base" value={wasteForm.date}
+            <input type="date" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base" value={wasteForm.date}
               onChange={e => setWasteForm({ ...wasteForm, date: e.target.value })} />
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">処分場</label>
-            <select className="w-full border rounded px-3 py-3 text-base" value={wasteForm.site_id}
+            <select className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base" value={wasteForm.site_id}
               onChange={e => setWasteForm({ ...wasteForm, site_id: e.target.value, waste_type_id: '' })}>
               <option value="">選択してください</option>
               {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -217,7 +217,7 @@ export default function EntryPage() {
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">廃材種類</label>
-            <select className="w-full border rounded px-3 py-3 text-base" value={wasteForm.waste_type_id}
+            <select className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base" value={wasteForm.waste_type_id}
               onChange={e => setWasteForm({ ...wasteForm, waste_type_id: e.target.value })}
               disabled={!wasteForm.site_id}>
               <option value="">選択してください</option>
@@ -230,7 +230,7 @@ export default function EntryPage() {
             <label className="block text-sm font-medium mb-1">
               数量 {selectedType && `(${selectedType.unit})`}
             </label>
-            <input type="number" step="0.001" inputMode="decimal" className="w-full border rounded px-3 py-3 text-base" value={wasteForm.quantity}
+            <input type="number" step="0.001" inputMode="decimal" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base" value={wasteForm.quantity}
               onChange={e => setWasteForm({ ...wasteForm, quantity: e.target.value })} placeholder="0" />
             {estimatedAmount !== null && (
               <p className="text-sm text-gray-500 mt-1">
@@ -239,17 +239,17 @@ export default function EntryPage() {
             )}
           </div>
           <button type="submit" disabled={saving || !wasteForm.waste_type_id || !wasteForm.quantity}
-            className="bg-blue-600 text-white py-3 rounded font-medium disabled:opacity-50 text-base">
+            className="bg-blue-600 text-white py-3 rounded-xl font-medium disabled:opacity-50 text-base">
             {saving ? '保存中...' : '保存する'}
           </button>
         </form>
       )}
 
       {tab === 'labor' && (
-        <form onSubmit={saveLabor} className="bg-white rounded-lg shadow p-4 flex flex-col gap-4">
+        <form onSubmit={saveLabor} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex flex-col gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">日付</label>
-            <input type="date" className="w-full border rounded px-3 py-3 text-base" value={laborDate}
+            <input type="date" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base" value={laborDate}
               onChange={e => setLaborDate(e.target.value)} />
           </div>
           <div>
@@ -296,17 +296,17 @@ export default function EntryPage() {
             </p>
           )}
           <button type="submit" disabled={saving || Object.keys(workerDayType).length === 0}
-            className="bg-blue-600 text-white py-3 rounded font-medium disabled:opacity-50 text-base">
+            className="bg-blue-600 text-white py-3 rounded-xl font-medium disabled:opacity-50 text-base">
             {saving ? '保存中...' : '保存する'}
           </button>
         </form>
       )}
 
       {(tab === 'fuel' || tab === 'lease' || tab === 'expense') && (
-        <form onSubmit={saveOther} className="bg-white rounded-lg shadow p-4 flex flex-col gap-4">
+        <form onSubmit={saveOther} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex flex-col gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">日付</label>
-            <input type="date" className="w-full border rounded px-3 py-3 text-base" value={otherForm.date}
+            <input type="date" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base" value={otherForm.date}
               onChange={e => setOtherForm({ ...otherForm, date: e.target.value })} />
           </div>
           {tab === 'lease' && (
@@ -326,7 +326,7 @@ export default function EntryPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">車両・重機</label>
-                <select className="w-full border rounded px-3 py-3 text-base" value={otherForm.vehicle_id}
+                <select className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base" value={otherForm.vehicle_id}
                   disabled={!otherForm.vehicle_category}
                   onChange={e => {
                     const vid = e.target.value
@@ -342,7 +342,7 @@ export default function EntryPage() {
               {isFirstVehicleUse && (
                 <div>
                   <label className="block text-sm font-medium mb-1">回送費（円・この現場でこの重機は初回のため必須）</label>
-                  <input type="number" inputMode="numeric" className="w-full border rounded px-3 py-3 text-base" value={otherForm.mobilization_fee}
+                  <input type="number" inputMode="numeric" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base" value={otherForm.mobilization_fee}
                     onChange={e => setOtherForm({ ...otherForm, mobilization_fee: e.target.value })} placeholder="0" />
                   <p className="text-xs text-gray-400 mt-1">この現場でこの車両・重機を車両代に記録するのは初めてです。搬入出の回送費を入力してください</p>
                 </div>
@@ -378,7 +378,7 @@ export default function EntryPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">数量（リットル）</label>
-                <input type="number" step="0.01" inputMode="decimal" className="w-full border rounded px-3 py-3 text-base" value={otherForm.quantity}
+                <input type="number" step="0.01" inputMode="decimal" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base" value={otherForm.quantity}
                   onChange={e => {
                     const quantity = e.target.value
                     setOtherForm(f => ({
@@ -389,7 +389,7 @@ export default function EntryPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">単価（円/L・任意）</label>
-                <input type="number" step="0.01" inputMode="decimal" className="w-full border rounded px-3 py-3 text-base" value={otherForm.liter_price}
+                <input type="number" step="0.01" inputMode="decimal" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base" value={otherForm.liter_price}
                   onChange={e => {
                     const literPrice = e.target.value
                     setOtherForm(f => ({
@@ -491,16 +491,16 @@ export default function EntryPage() {
           )}
           <div>
             <label className="block text-sm font-medium mb-1">金額（円）</label>
-            <input type="number" inputMode="numeric" className="w-full border rounded px-3 py-3 text-base" value={otherForm.unit_price}
+            <input type="number" inputMode="numeric" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base" value={otherForm.unit_price}
               onChange={e => setOtherForm({ ...otherForm, unit_price: e.target.value })} placeholder="0" />
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">メモ（任意）</label>
-            <input className="w-full border rounded px-3 py-3 text-base" value={otherForm.note}
+            <input className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base" value={otherForm.note}
               onChange={e => setOtherForm({ ...otherForm, note: e.target.value })} placeholder="" />
           </div>
           <button type="submit" disabled={saving || !otherForm.unit_price || (isFirstVehicleUse && !otherForm.mobilization_fee)}
-            className="bg-blue-600 text-white py-3 rounded font-medium disabled:opacity-50 text-base">
+            className="bg-blue-600 text-white py-3 rounded-xl font-medium disabled:opacity-50 text-base">
             {saving ? '処理中...' : '保存する'}
           </button>
         </form>

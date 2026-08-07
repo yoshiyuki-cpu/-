@@ -298,12 +298,12 @@ export default function ProjectDetailPage() {
               <div className="flex flex-col gap-3">
                 <div>
                   <label className="block text-sm font-medium mb-1">日付</label>
-                  <input type="date" className="w-full border rounded px-3 py-2 text-base" value={editTarget.date}
+                  <input type="date" className="w-full border border-gray-200 rounded-xl px-3 py-2 text-base" value={editTarget.date}
                     onChange={e => setEditTarget({ ...editTarget, date: e.target.value })} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">処分場</label>
-                  <select className="w-full border rounded px-3 py-2 text-base" value={editTarget.site_id}
+                  <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-base" value={editTarget.site_id}
                     onChange={e => setEditTarget({ ...editTarget, site_id: e.target.value, waste_type_id: '' })}>
                     <option value="">選択してください</option>
                     {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -311,7 +311,7 @@ export default function ProjectDetailPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">廃材種類</label>
-                  <select className="w-full border rounded px-3 py-2 text-base" value={editTarget.waste_type_id}
+                  <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-base" value={editTarget.waste_type_id}
                     onChange={e => setEditTarget({ ...editTarget, waste_type_id: e.target.value })}
                     disabled={!editTarget.site_id}>
                     <option value="">選択してください</option>
@@ -322,7 +322,7 @@ export default function ProjectDetailPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">数量</label>
-                  <input type="number" step="0.001" inputMode="decimal" className="w-full border rounded px-3 py-2 text-base"
+                  <input type="number" step="0.001" inputMode="decimal" className="w-full border border-gray-200 rounded-xl px-3 py-2 text-base"
                     value={editTarget.quantity} onChange={e => setEditTarget({ ...editTarget, quantity: e.target.value })} />
                 </div>
               </div>
@@ -332,12 +332,12 @@ export default function ProjectDetailPage() {
               <div className="flex flex-col gap-3">
                 <div>
                   <label className="block text-sm font-medium mb-1">日付</label>
-                  <input type="date" className="w-full border rounded px-3 py-2 text-base" value={editTarget.date}
+                  <input type="date" className="w-full border border-gray-200 rounded-xl px-3 py-2 text-base" value={editTarget.date}
                     onChange={e => setEditTarget({ ...editTarget, date: e.target.value })} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">作業員</label>
-                  <select className="w-full border rounded px-3 py-2 text-base" value={editTarget.worker_id}
+                  <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-base" value={editTarget.worker_id}
                     onChange={e => setEditTarget({ ...editTarget, worker_id: e.target.value })}>
                     {workers.map(w => <option key={w.id} value={w.id}>{w.name}{w.company_name ? `（${w.company_name}）` : ''}</option>)}
                   </select>
@@ -362,7 +362,7 @@ export default function ProjectDetailPage() {
               <div className="flex flex-col gap-3">
                 <div>
                   <label className="block text-sm font-medium mb-1">日付</label>
-                  <input type="date" className="w-full border rounded px-3 py-2 text-base" value={editTarget.date}
+                  <input type="date" className="w-full border border-gray-200 rounded-xl px-3 py-2 text-base" value={editTarget.date}
                     onChange={e => setEditTarget({ ...editTarget, date: e.target.value })} />
                 </div>
                 {editTarget.entry_type === 'lease' && (
@@ -382,7 +382,7 @@ export default function ProjectDetailPage() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium mb-1">車両・重機</label>
-                      <select className="w-full border rounded px-3 py-2 text-base" value={editTarget.vehicle_id}
+                      <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-base" value={editTarget.vehicle_id}
                         disabled={!editTarget.vehicle_category}
                         onChange={e => {
                           const vid = e.target.value
@@ -414,7 +414,7 @@ export default function ProjectDetailPage() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium mb-1">数量（リットル）</label>
-                      <input type="number" step="0.01" inputMode="decimal" className="w-full border rounded px-3 py-2 text-base"
+                      <input type="number" step="0.01" inputMode="decimal" className="w-full border border-gray-200 rounded-xl px-3 py-2 text-base"
                         value={editTarget.quantity} onChange={e => {
                           const quantity = e.target.value
                           setEditTarget(t => t && t.type === 'other' ? {
@@ -425,7 +425,7 @@ export default function ProjectDetailPage() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium mb-1">単価（円/L・任意）</label>
-                      <input type="number" step="0.01" inputMode="decimal" className="w-full border rounded px-3 py-2 text-base"
+                      <input type="number" step="0.01" inputMode="decimal" className="w-full border border-gray-200 rounded-xl px-3 py-2 text-base"
                         value={editTarget.liter_price} placeholder="例：165" onChange={e => {
                           const literPrice = e.target.value
                           setEditTarget(t => t && t.type === 'other' ? {
@@ -439,12 +439,12 @@ export default function ProjectDetailPage() {
                 )}
                 <div>
                   <label className="block text-sm font-medium mb-1">金額（円）</label>
-                  <input type="number" inputMode="numeric" className="w-full border rounded px-3 py-2 text-base"
+                  <input type="number" inputMode="numeric" className="w-full border border-gray-200 rounded-xl px-3 py-2 text-base"
                     value={editTarget.unit_price} onChange={e => setEditTarget({ ...editTarget, unit_price: e.target.value })} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">メモ（任意）</label>
-                  <input className="w-full border rounded px-3 py-2 text-base"
+                  <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-base"
                     value={editTarget.note} onChange={e => setEditTarget({ ...editTarget, note: e.target.value })} />
                 </div>
               </div>
@@ -481,7 +481,7 @@ export default function ProjectDetailPage() {
             </a>
           )}
         </div>
-        <Link href={`/projects/${id}/entry`} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium shrink-0">
+        <Link href={`/projects/${id}/entry`} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-full text-sm font-semibold shadow-sm transition shrink-0">
           + 入力
         </Link>
       </div>
@@ -504,37 +504,37 @@ export default function ProjectDetailPage() {
       {/* ナビゲーション */}
       <div className="grid grid-cols-2 gap-2 mb-4">
         <Link href={`/projects/${id}/plan`}
-          className="bg-white rounded-lg shadow p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
+          className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
           <span className="text-2xl">📊</span>
           <span className="font-medium text-xs text-gray-700">予算・工程</span>
           <span className="text-xs text-gray-400">計画管理</span>
         </Link>
         <Link href={`/projects/${id}/scrap`}
-          className="bg-white rounded-lg shadow p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
+          className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
           <span className="text-2xl">♻️</span>
           <span className="font-medium text-xs text-gray-700">スクラップ</span>
           <span className="text-xs text-gray-400">写真・伝票記録</span>
         </Link>
         <Link href={`/projects/${id}/minutes`}
-          className="bg-white rounded-lg shadow p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
+          className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
           <span className="text-2xl">📋</span>
           <span className="font-medium text-xs text-gray-700">議事録</span>
           <span className="text-xs text-gray-400">危険箇所・注意事項</span>
         </Link>
         <Link href={`/projects/${id}/ky`}
-          className="bg-white rounded-lg shadow p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
+          className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
           <span className="text-2xl">🛡️</span>
           <span className="font-medium text-xs text-gray-700">KY活動</span>
           <span className="text-xs text-gray-400">写真記録</span>
         </Link>
         <Link href={`/projects/${id}/tools`}
-          className="bg-white rounded-lg shadow p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
+          className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
           <span className="text-2xl">🧰</span>
           <span className="font-medium text-xs text-gray-700">使用道具</span>
           <span className="text-xs text-gray-400">貸出・返却</span>
         </Link>
         <Link href={`/projects/${id}/scaffold`}
-          className="bg-white rounded-lg shadow p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
+          className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
           <span className="text-2xl">📐</span>
           <span className="font-medium text-xs text-gray-700">足場計算</span>
           <span className="text-xs text-gray-400">本数の目安</span>
@@ -542,7 +542,7 @@ export default function ProjectDetailPage() {
       </div>
 
       {/* 上空図面 */}
-      <div className="bg-white rounded-lg shadow p-4 mb-4">
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-4">
         <div className="flex justify-between items-center mb-2">
           <h2 className="font-bold text-gray-700 text-sm">上空図面</h2>
           <div className="flex gap-2">
@@ -571,7 +571,7 @@ export default function ProjectDetailPage() {
       </div>
 
       {/* 備考欄 */}
-      <div className="bg-white rounded-lg shadow p-4 mb-4">
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-4">
         <div className="flex justify-between items-center mb-1">
           <h2 className="font-bold text-gray-700 text-sm">備考・メモ</h2>
           {!editNotes && (
@@ -581,7 +581,7 @@ export default function ProjectDetailPage() {
         {editNotes ? (
           <div className="flex flex-col gap-2">
             <textarea
-              className="w-full border rounded px-3 py-2 text-sm resize-none"
+              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm resize-none"
               rows={3}
               value={notesValue}
               onChange={e => setNotesValue(e.target.value)}
@@ -589,9 +589,9 @@ export default function ProjectDetailPage() {
             />
             <div className="flex gap-2">
               <button onClick={() => { setEditNotes(false); setNotesValue(project.notes ?? '') }}
-                className="flex-1 py-1.5 border rounded text-sm text-gray-600">キャンセル</button>
+                className="flex-1 py-1.5 border border-gray-200 rounded-xl text-sm text-gray-600">キャンセル</button>
               <button onClick={saveNotes}
-                className="flex-1 py-1.5 bg-blue-600 text-white rounded text-sm">保存</button>
+                className="flex-1 py-1.5 bg-blue-600 text-white rounded-lg text-sm">保存</button>
             </div>
           </div>
         ) : (
@@ -602,7 +602,7 @@ export default function ProjectDetailPage() {
       </div>
 
       {/* 集計カード */}
-      <div className="bg-white rounded-lg shadow p-4 mb-4">
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-4">
         <div className="flex justify-between items-center mb-3">
           <h2 className="font-bold text-gray-700">集計</h2>
           <button onClick={() => setShowChart(v => !v)} className="text-xs text-blue-600">
@@ -652,7 +652,7 @@ export default function ProjectDetailPage() {
         <h2 className="font-bold text-gray-700">記録一覧</h2>
         <button
           onClick={() => setSortDir(d => d === 'desc' ? 'asc' : 'desc')}
-          className="text-xs text-gray-500 border rounded px-2 py-1 bg-white"
+          className="text-xs text-gray-500 border border-gray-200 rounded-xl px-2 py-1 bg-white"
         >
           日付 {sortDir === 'desc' ? '▼ 新しい順' : '▲ 古い順'}
         </button>
@@ -663,7 +663,7 @@ export default function ProjectDetailPage() {
       {sortedWaste.length === 0 && <p className="text-gray-400 text-sm mb-4">記録なし</p>}
       <div className="flex flex-col gap-2 mb-4">
         {sortedWaste.map((e: any) => (
-          <div key={e.id} className="bg-white rounded shadow px-3 py-3 flex justify-between items-center text-sm">
+          <div key={e.id} className="bg-white rounded-xl border border-gray-100 shadow-sm px-3 py-3 flex justify-between items-center text-sm">
             <div className="flex-1 min-w-0">
               <span className="font-medium">{e.date}</span>
               <span className="text-gray-500 mx-1">·</span>
@@ -691,7 +691,7 @@ export default function ProjectDetailPage() {
       {sortedLabor.length === 0 && <p className="text-gray-400 text-sm mb-4">記録なし</p>}
       <div className="flex flex-col gap-2 mb-4">
         {sortedLabor.map((e: any) => (
-          <div key={e.id} className="bg-white rounded shadow px-3 py-3 flex justify-between items-center text-sm">
+          <div key={e.id} className="bg-white rounded-xl border border-gray-100 shadow-sm px-3 py-3 flex justify-between items-center text-sm">
             <div className="flex-1">
               <span className="font-medium">{e.date}</span>
               <span className="mx-1">·</span>
@@ -716,7 +716,7 @@ export default function ProjectDetailPage() {
       {sortedOther.length === 0 && <p className="text-gray-400 text-sm">記録なし</p>}
       <div className="flex flex-col gap-2 pb-8">
         {sortedOther.map((e) => (
-          <div key={e.id} className="bg-white rounded shadow px-3 py-3 flex justify-between items-center text-sm">
+          <div key={e.id} className="bg-white rounded-xl border border-gray-100 shadow-sm px-3 py-3 flex justify-between items-center text-sm">
             <div className="flex-1">
               <span className="font-medium">{e.date}</span>
               <span className="text-gray-500 mx-1">·</span>
