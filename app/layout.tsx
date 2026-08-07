@@ -14,12 +14,19 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ja">
-      <body className="bg-gray-50 min-h-screen">
-        <header className="no-print bg-blue-700 text-white px-4 py-3">
-          <p className="text-xs text-blue-200 leading-none">株式会社良心</p>
-          <p className="text-lg font-bold leading-tight">良心アプリ</p>
+      <body className="min-h-screen">
+        <header className="no-print sticky top-0 z-30 bg-gradient-to-r from-slate-900 via-blue-900 to-blue-800 text-white px-4 py-3 shadow-md">
+          <div className="max-w-2xl mx-auto flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-white/15 backdrop-blur flex items-center justify-center font-bold text-lg shadow-inner shrink-0">
+              良
+            </div>
+            <div className="leading-tight">
+              <p className="text-[10px] tracking-widest text-blue-200/90">株式会社良心</p>
+              <p className="text-lg font-bold">良心アプリ</p>
+            </div>
+          </div>
         </header>
-        <main className="app-main max-w-2xl mx-auto px-4 py-6 pb-24">
+        <main className="app-main max-w-2xl mx-auto px-4 py-6 pb-28">
           {children}
         </main>
         <BottomNav />

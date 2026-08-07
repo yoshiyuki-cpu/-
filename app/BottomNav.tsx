@@ -14,13 +14,16 @@ export default function BottomNav() {
   const pathname = usePathname()
 
   return (
-    <nav className="no-print fixed bottom-0 left-0 right-0 bg-white border-t flex z-40" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+    <nav className="no-print fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-lg border-t border-gray-200/80 flex z-40 shadow-[0_-4px_16px_rgba(0,0,0,0.04)]"
+      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
       {NAV_ITEMS.map(item => {
         const active = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href)
         return (
           <Link key={item.href} href={item.href}
-            className={`flex-1 flex flex-col items-center gap-0.5 py-2 text-xs font-medium transition ${active ? 'text-blue-600' : 'text-gray-400'}`}>
-            <span className={`text-xl leading-none transition ${active ? '' : 'opacity-60'}`}>{item.icon}</span>
+            className={`flex-1 flex flex-col items-center gap-0.5 pt-1.5 pb-2 text-[11px] transition ${active ? 'text-blue-700 font-semibold' : 'text-gray-400 font-medium'}`}>
+            <span className={`text-xl leading-none px-3.5 py-1 rounded-full transition ${active ? 'bg-blue-100/80' : 'opacity-55'}`}>
+              {item.icon}
+            </span>
             <span>{item.label}</span>
           </Link>
         )
