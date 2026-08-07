@@ -25,6 +25,13 @@ input, select, textarea, button {
   font-family: inherit;
 }
 
+/* 全画面共通：フォーム入力のフォーカスリング */
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: rgb(147 197 253);
+  box-shadow: 0 0 0 3px rgb(59 130 246 / 0.15);
+}
+
 @media print {
   .no-print {
     display: none !important;

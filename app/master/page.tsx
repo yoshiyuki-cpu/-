@@ -204,7 +204,7 @@ export default function MasterPage() {
     : wasteTypes
 
   const tabClass = (t: string) =>
-    `flex-1 py-2 text-sm font-medium border-b-2 transition ${tab === t ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500'}`
+    `shrink-0 whitespace-nowrap px-3.5 py-2 rounded-full text-sm font-medium transition ${tab === t ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`
 
   return (
     <div>
@@ -213,7 +213,7 @@ export default function MasterPage() {
         <Link href="/tools" className="text-sm text-blue-600 border rounded-full px-3 py-1.5">🧰 置き場道具管理</Link>
       </div>
 
-      <div className="flex mb-4 border-b overflow-x-auto">
+      <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1">
         <button className={tabClass('disposal')} onClick={() => setTab('disposal')}>処分場・廃材</button>
         <button className={tabClass('worker')} onClick={() => setTab('worker')}>作業員</button>
         <button className={tabClass('vehicle')} onClick={() => setTab('vehicle')}>車両・重機</button>
@@ -224,12 +224,12 @@ export default function MasterPage() {
 
       {tab === 'disposal' && (
         <>
-          <section className="bg-white rounded-lg shadow p-4 mb-4">
+          <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-4">
             <h2 className="font-bold mb-3 text-gray-700">処分場</h2>
             <div className="flex gap-2 mb-3">
-              <input className="flex-1 border rounded px-3 py-2 text-sm" value={newSiteName}
+              <input className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm" value={newSiteName}
                 onChange={e => setNewSiteName(e.target.value)} placeholder="新しい処分場名" />
-              <button onClick={addSite} className="bg-blue-600 text-white px-3 py-2 rounded text-sm">追加</button>
+              <button onClick={addSite} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm">追加</button>
             </div>
             <div className="flex flex-col gap-1">
               {sites.map(s => (
@@ -241,24 +241,24 @@ export default function MasterPage() {
             </div>
           </section>
 
-          <section className="bg-white rounded-lg shadow p-4 mb-4">
+          <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-4">
             <h2 className="font-bold mb-3 text-gray-700">廃材種類・単価</h2>
             <div className="mb-3">
               <label className="block text-sm font-medium mb-1">処分場で絞り込み</label>
-              <select className="w-full border rounded px-3 py-2 text-sm" value={selectedSiteId}
+              <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" value={selectedSiteId}
                 onChange={e => setSelectedSiteId(e.target.value)}>
                 <option value="">すべて</option>
                 {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
             {selectedSiteId && (
-              <div className="border rounded p-3 mb-3 bg-gray-50">
+              <div className="border border-gray-200 rounded-xl p-3 mb-3 bg-gray-50">
                 <p className="text-sm font-medium mb-2">新規廃材種類を追加</p>
                 <div className="flex flex-col gap-2">
-                  <input className="border rounded px-3 py-1 text-sm" value={newWaste.name}
+                  <input className="border border-gray-200 rounded-xl px-3 py-1 text-sm" value={newWaste.name}
                     onChange={e => setNewWaste({ ...newWaste, name: e.target.value })} placeholder="廃材名" />
                   <div className="flex gap-2">
-                    <select className="flex-1 border rounded px-2 py-1 text-sm" value={newWaste.unit}
+                    <select className="flex-1 border border-gray-200 rounded-xl px-2 py-1 text-sm" value={newWaste.unit}
                       onChange={e => setNewWaste({ ...newWaste, unit: e.target.value })}>
                       <option value="kg">kg</option>
                       <option value="トン">トン</option>
@@ -267,16 +267,16 @@ export default function MasterPage() {
                       <option value="台">台</option>
                       <option value="本">本</option>
                     </select>
-                    <select className="flex-1 border rounded px-2 py-1 text-sm" value={newWaste.entry_type}
+                    <select className="flex-1 border border-gray-200 rounded-xl px-2 py-1 text-sm" value={newWaste.entry_type}
                       onChange={e => setNewWaste({ ...newWaste, entry_type: e.target.value })}>
                       <option value="cost">処分費（支払）</option>
                       <option value="revenue">スクラップ（収益）</option>
                     </select>
                   </div>
                   <div className="flex gap-2">
-                    <input type="number" inputMode="decimal" step="0.01" className="flex-1 border rounded px-3 py-1 text-sm" value={newWaste.unit_price}
+                    <input type="number" inputMode="decimal" step="0.01" className="flex-1 border border-gray-200 rounded-xl px-3 py-1 text-sm" value={newWaste.unit_price}
                       onChange={e => setNewWaste({ ...newWaste, unit_price: e.target.value })} placeholder="単価（円、小数可）" />
-                    <button onClick={addWasteType} className="bg-blue-600 text-white px-3 py-1 rounded text-sm">追加</button>
+                    <button onClick={addWasteType} className="bg-blue-600 text-white px-3 py-1 rounded-lg text-sm">追加</button>
                   </div>
                 </div>
               </div>
@@ -294,7 +294,7 @@ export default function MasterPage() {
                   <div className="flex items-center gap-2">
                     {editingPrice?.id === w.id ? (
                       <div className="flex items-center gap-1">
-                        <input type="number" inputMode="decimal" step="0.01" className="border rounded px-2 py-1 text-sm w-24"
+                        <input type="number" inputMode="decimal" step="0.01" className="border border-gray-200 rounded-xl px-2 py-1 text-sm w-24"
                           value={editingPrice.price}
                           onChange={e => setEditingPrice({ ...editingPrice, price: e.target.value })} />
                         <span className="text-xs text-gray-500">円/{w.unit}</span>
@@ -317,16 +317,16 @@ export default function MasterPage() {
       )}
 
       {tab === 'worker' && (
-        <section className="bg-white rounded-lg shadow p-4">
+        <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
           <h2 className="font-bold mb-3 text-gray-700">作業員</h2>
-          <div className="border rounded p-3 mb-3 bg-gray-50">
+          <div className="border border-gray-200 rounded-xl p-3 mb-3 bg-gray-50">
             <p className="text-sm font-medium mb-2">新規作業員を追加</p>
             <div className="flex flex-col gap-2">
-              <input className="border rounded px-3 py-2 text-sm" value={newWorker.name}
+              <input className="border border-gray-200 rounded-xl px-3 py-2 text-sm" value={newWorker.name}
                 onChange={e => setNewWorker({ ...newWorker, name: e.target.value })} placeholder="作業員名" />
-              <input className="border rounded px-3 py-2 text-sm" value={newWorker.company_name}
+              <input className="border border-gray-200 rounded-xl px-3 py-2 text-sm" value={newWorker.company_name}
                 onChange={e => setNewWorker({ ...newWorker, company_name: e.target.value })} placeholder="協力会社名（任意）" />
-              <button onClick={addWorker} className="bg-blue-600 text-white py-2 rounded text-sm">追加</button>
+              <button onClick={addWorker} className="bg-blue-600 text-white py-2 rounded-lg text-sm">追加</button>
             </div>
           </div>
           <div className="flex flex-col gap-1">
@@ -344,15 +344,15 @@ export default function MasterPage() {
       )}
 
       {tab === 'vehicle' && (
-        <section className="bg-white rounded-lg shadow p-4">
+        <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
           <h2 className="font-bold mb-3 text-gray-700">車両・重機</h2>
           <p className="text-xs text-gray-500 mb-3">
             単価を設定すると入力画面で自動入力されますが、その場での金額変更もできます。月極リースなど金額が変動する場合は単価を空欄のままにできます。
           </p>
-          <div className="border rounded p-3 mb-3 bg-gray-50">
+          <div className="border border-gray-200 rounded-xl p-3 mb-3 bg-gray-50">
             <p className="text-sm font-medium mb-2">新規車両・重機を追加</p>
             <div className="flex flex-col gap-2">
-              <input className="border rounded px-3 py-2 text-sm" value={newVehicle.name}
+              <input className="border border-gray-200 rounded-xl px-3 py-2 text-sm" value={newVehicle.name}
                 onChange={e => setNewVehicle({ ...newVehicle, name: e.target.value })} placeholder="車両・重機名" />
               <div className="flex gap-2">
                 <button type="button" onClick={() => setNewVehicle({ ...newVehicle, category: 'rental' })}
@@ -365,12 +365,12 @@ export default function MasterPage() {
                 </button>
               </div>
               <div className="flex gap-2">
-                <input type="number" inputMode="decimal" step="0.01" className="flex-1 border rounded px-3 py-1 text-sm" value={newVehicle.default_price}
+                <input type="number" inputMode="decimal" step="0.01" className="flex-1 border border-gray-200 rounded-xl px-3 py-1 text-sm" value={newVehicle.default_price}
                   onChange={e => setNewVehicle({ ...newVehicle, default_price: e.target.value })} placeholder="基本単価（円・任意）" />
-                <input className="w-20 border rounded px-3 py-1 text-sm" value={newVehicle.unit}
+                <input className="w-20 border border-gray-200 rounded-xl px-3 py-1 text-sm" value={newVehicle.unit}
                   onChange={e => setNewVehicle({ ...newVehicle, unit: e.target.value })} placeholder="単位" />
               </div>
-              <button onClick={addVehicle} className="bg-blue-600 text-white py-2 rounded text-sm">追加</button>
+              <button onClick={addVehicle} className="bg-blue-600 text-white py-2 rounded-lg text-sm">追加</button>
             </div>
           </div>
 
@@ -387,7 +387,7 @@ export default function MasterPage() {
                     <div className="flex items-center gap-2">
                       {editingVehiclePrice?.id === v.id ? (
                         <div className="flex items-center gap-1">
-                          <input type="number" inputMode="decimal" step="0.01" className="border rounded px-2 py-1 text-sm w-24"
+                          <input type="number" inputMode="decimal" step="0.01" className="border border-gray-200 rounded-xl px-2 py-1 text-sm w-24"
                             value={editingVehiclePrice.price}
                             onChange={e => setEditingVehiclePrice({ ...editingVehiclePrice, price: e.target.value })} />
                           <span className="text-xs text-gray-500">円/{v.unit}</span>
@@ -411,7 +411,7 @@ export default function MasterPage() {
       )}
 
       {tab === 'scaffold' && (
-        <section className="bg-white rounded-lg shadow p-4">
+        <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
           <h2 className="font-bold mb-3 text-gray-700">足場材料単価</h2>
           <p className="text-xs text-gray-500 mb-3">
             足場計算画面（現場ごと・グローバル電卓とも共通）の資材コスト概算に使われます。単価未設定の項目は0円で計算されます。
@@ -424,7 +424,7 @@ export default function MasterPage() {
                 <span>{p.label}m</span>
                 {editingScaffoldPrice?.id === p.id ? (
                   <div className="flex items-center gap-1">
-                    <input type="number" inputMode="decimal" step="0.01" className="border rounded px-2 py-1 text-sm w-24"
+                    <input type="number" inputMode="decimal" step="0.01" className="border border-gray-200 rounded-xl px-2 py-1 text-sm w-24"
                       value={editingScaffoldPrice.price}
                       onChange={e => setEditingScaffoldPrice({ ...editingScaffoldPrice, price: e.target.value })} />
                     <span className="text-xs text-gray-500">円/本</span>
@@ -443,9 +443,9 @@ export default function MasterPage() {
 
           <p className="text-xs font-semibold text-gray-500 mb-1">用途別部材（円/本）</p>
           <div className="flex gap-2 mb-3">
-            <input className="flex-1 border rounded px-3 py-2 text-sm" value={newScaffoldUsage}
+            <input className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm" value={newScaffoldUsage}
               onChange={e => setNewScaffoldUsage(e.target.value)} placeholder="新しい用途名（例：単管クランプ）" />
-            <button onClick={addScaffoldUsagePrice} className="bg-blue-600 text-white px-3 py-2 rounded text-sm">追加</button>
+            <button onClick={addScaffoldUsagePrice} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm">追加</button>
           </div>
           <div className="flex flex-col gap-1">
             {scaffoldPrices.filter(p => p.category === 'usage').map(p => (
@@ -454,7 +454,7 @@ export default function MasterPage() {
                 <div className="flex items-center gap-2">
                   {editingScaffoldPrice?.id === p.id ? (
                     <div className="flex items-center gap-1">
-                      <input type="number" inputMode="decimal" step="0.01" className="border rounded px-2 py-1 text-sm w-24"
+                      <input type="number" inputMode="decimal" step="0.01" className="border border-gray-200 rounded-xl px-2 py-1 text-sm w-24"
                         value={editingScaffoldPrice.price}
                         onChange={e => setEditingScaffoldPrice({ ...editingScaffoldPrice, price: e.target.value })} />
                       <span className="text-xs text-gray-500">円/本</span>
@@ -476,7 +476,7 @@ export default function MasterPage() {
       )}
 
       {tab === 'fuel' && (
-        <section className="bg-white rounded-lg shadow p-4">
+        <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
           <h2 className="font-bold mb-3 text-gray-700">燃料単価</h2>
           <p className="text-xs text-gray-500 mb-3">
             記録入力の燃料代で種類（軽油／レギュラー）を選ぶと、ここで設定した単価が自動入力されます。相場が変わったらここで基本単価を更新してください。入力時にその場で単価を上書きすることもできます。
@@ -487,7 +487,7 @@ export default function MasterPage() {
                 <span>{fp.fuel_type}</span>
                 {editingFuelPrice?.id === fp.id ? (
                   <div className="flex items-center gap-1">
-                    <input type="number" inputMode="decimal" step="0.01" className="border rounded px-2 py-1 text-sm w-24"
+                    <input type="number" inputMode="decimal" step="0.01" className="border border-gray-200 rounded-xl px-2 py-1 text-sm w-24"
                       value={editingFuelPrice.price}
                       onChange={e => setEditingFuelPrice({ ...editingFuelPrice, price: e.target.value })} />
                     <span className="text-xs text-gray-500">円/L</span>
@@ -507,54 +507,54 @@ export default function MasterPage() {
       )}
 
       {tab === 'company' && company && (
-        <section className="bg-white rounded-lg shadow p-4">
+        <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
           <h2 className="font-bold mb-3 text-gray-700">会社情報（見積書に表示されます）</h2>
           <div className="flex flex-col gap-3">
             <div>
               <label className="block text-sm font-medium mb-1">会社名</label>
-              <input className="w-full border rounded px-3 py-2 text-sm" value={company.name}
+              <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" value={company.name}
                 onChange={e => setCompany({ ...company, name: e.target.value })} />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">郵便番号</label>
-              <input className="w-full border rounded px-3 py-2 text-sm" value={company.postal_code ?? ''}
+              <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" value={company.postal_code ?? ''}
                 onChange={e => setCompany({ ...company, postal_code: e.target.value })} placeholder="例：700-0000" />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">住所</label>
-              <input className="w-full border rounded px-3 py-2 text-sm" value={company.address ?? ''}
+              <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" value={company.address ?? ''}
                 onChange={e => setCompany({ ...company, address: e.target.value })} />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">事務所名（任意）</label>
-              <input className="w-full border rounded px-3 py-2 text-sm" value={company.office_name ?? ''}
+              <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" value={company.office_name ?? ''}
                 onChange={e => setCompany({ ...company, office_name: e.target.value })} placeholder="例：豊浜事務所B101" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-medium mb-1">電話番号</label>
-                <input className="w-full border rounded px-3 py-2 text-sm" value={company.tel ?? ''}
+                <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" value={company.tel ?? ''}
                   onChange={e => setCompany({ ...company, tel: e.target.value })} />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">FAX番号</label>
-                <input className="w-full border rounded px-3 py-2 text-sm" value={company.fax ?? ''}
+                <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" value={company.fax ?? ''}
                   onChange={e => setCompany({ ...company, fax: e.target.value })} />
               </div>
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Mailアドレス</label>
-              <input className="w-full border rounded px-3 py-2 text-sm" value={company.email ?? ''}
+              <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" value={company.email ?? ''}
                 onChange={e => setCompany({ ...company, email: e.target.value })} placeholder="例：info@example.com" />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">建設業許可番号</label>
-              <input className="w-full border rounded px-3 py-2 text-sm" value={company.license_no ?? ''}
+              <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" value={company.license_no ?? ''}
                 onChange={e => setCompany({ ...company, license_no: e.target.value })} placeholder="例：岡山県知事許可（般-6）第00000号" />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">代表者名</label>
-              <input className="w-full border rounded px-3 py-2 text-sm" value={company.representative ?? ''}
+              <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" value={company.representative ?? ''}
                 onChange={e => setCompany({ ...company, representative: e.target.value })} />
             </div>
             <div>
@@ -564,7 +564,7 @@ export default function MasterPage() {
               {uploadingStamp && <p className="text-xs text-gray-500 mt-1">アップロード中...</p>}
             </div>
             <button onClick={saveCompany} disabled={savingCompany}
-              className="bg-blue-600 text-white py-2 rounded text-sm font-medium disabled:opacity-50">
+              className="bg-blue-600 text-white py-2 rounded-lg text-sm font-medium disabled:opacity-50">
               {savingCompany ? '保存中...' : '保存する'}
             </button>
           </div>
