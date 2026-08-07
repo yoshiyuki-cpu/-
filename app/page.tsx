@@ -92,7 +92,7 @@ export default function HomePage() {
   const completedCount = projects.filter(p => p.status === 'completed').length
 
   const filterBtnClass = (f: StatusFilter) =>
-    `px-3 py-1 rounded-full text-sm font-medium transition ${statusFilter === f ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 border'}`
+    `px-3.5 py-1.5 rounded-full text-sm font-medium transition ${statusFilter === f ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`
 
   if (loading) return <p className="text-center py-10 text-gray-500">読み込み中...</p>
 
@@ -105,20 +105,23 @@ export default function HomePage() {
             進行中 {activeCount}件　完了 {completedCount}件　合計 {projects.length}件
           </p>
         </div>
-        <Link href="/projects/new" className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium">
-          + 新規現場
+        <Link href="/projects/new" className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-full text-sm font-semibold shadow-sm transition">
+          ＋ 新規現場
         </Link>
       </div>
 
       {/* 検索・絞り込み */}
-      <div className="mb-4 flex flex-col gap-2">
-        <input
-          type="text"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="現場名・場所で検索..."
-          className="w-full border rounded-lg px-3 py-2 text-sm bg-white"
-        />
+      <div className="mb-4 flex flex-col gap-2.5">
+        <div className="relative">
+          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="現場名・場所で検索..."
+            className="w-full border border-gray-200 rounded-xl pl-10 pr-4 py-2.5 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-300 transition"
+          />
+        </div>
         <div className="flex gap-2">
           <button className={filterBtnClass('all')} onClick={() => setStatusFilter('all')}>すべて ({projects.length})</button>
           <button className={filterBtnClass('active')} onClick={() => setStatusFilter('active')}>進行中 ({activeCount})</button>
@@ -139,15 +142,16 @@ export default function HomePage() {
           const isProfit = profit >= 0
           return (
             <Link key={p.id} href={`/projects/${p.id}`}>
-              <div className="bg-white rounded-lg shadow p-4 hover:shadow-md transition active:scale-[0.99]">
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 hover:shadow-md transition active:scale-[0.99]">
                 <div className="flex justify-between items-start mb-2">
                   <div>
-                    <h2 className="font-bold text-lg">{p.name}</h2>
+                    <h2 className="font-bold text-lg tracking-tight">{p.name}</h2>
                     <p className="text-sm text-gray-500">{p.start_date} 〜 {p.end_date ?? '進行中'}</p>
                     {p.location && <p className="text-xs text-gray-400 mt-0.5">📍 {p.location}</p>}
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0">
-                    <span className={`text-xs px-2 py-1 rounded-full ${p.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                    <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${p.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${p.status === 'active' ? 'bg-emerald-500' : 'bg-gray-400'}`} />
                       {p.status === 'active' ? '進行中' : '完了'}
                     </span>
                     <button type="button"
@@ -165,7 +169,7 @@ export default function HomePage() {
                   <div className="font-bold border-t pt-1 mt-1">支出合計</div>
                   <div className="text-right font-bold border-t pt-1 mt-1 text-red-700">{fmt(totalCost)}</div>
                 </div>
-                <div className={`mt-2 pt-2 border-t flex justify-between items-center rounded px-2 py-1 ${isProfit ? 'bg-blue-50' : 'bg-red-50'}`}>
+                <div className={`mt-3 flex justify-between items-center rounded-xl px-3 py-2 ${isProfit ? 'bg-blue-50' : 'bg-red-50'}`}>
                   <span className="text-sm font-bold text-gray-700">差引損益</span>
                   <span className={`font-bold text-base ${isProfit ? 'text-blue-700' : 'text-red-700'}`}>
                     {isProfit ? '+' : ''}{fmt(profit)}
@@ -179,7 +183,7 @@ export default function HomePage() {
 
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm">
             <h3 className="font-bold text-lg mb-2">現場を削除しますか？</h3>
             <p className="text-sm text-gray-600 mb-4">
               <span className="font-medium text-gray-900">{deleteTarget.name}</span> を削除します。<br />
