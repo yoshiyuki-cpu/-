@@ -41,6 +41,9 @@ export default function UsagePage() {
   const [events, setEvents] = useState<Ev[]>([])
   const [projects, setProjects] = useState<ProjectRow[]>([])
   const [workers, setWorkers] = useState<WorkerRow[]>([])
+  const [aiText, setAiText] = useState('')
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState('')
 
   useEffect(() => { load() }, [])
 
@@ -121,11 +124,62 @@ export default function UsagePage() {
   })).filter(w => w.count > 0).sort((a, b) => b.count - a.count)
   const maxWorker = Math.max(1, ...laborByWorker.map(w => w.count))
 
+  async function runAiAnalysis() {
+    setAiLoading(true)
+    setAiError('')
+    try {
+      const stats = {
+        today: new Date().toISOString().split('T')[0],
+        summary: { recent30Count: recent.length, daysWithInput: recentDays, activeProjectCount: activeProjects.length },
+        weekly: weeks,
+        byCategory: catCounts,
+        projectsLastInput: lastByProject.map(p => ({ name: p.name, ago: p.ago })),
+        workersLabor30d: laborByWorker.map(w => ({ name: w.name, days: w.count })),
+      }
+      const res = await fetch('/api/analyze-usage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stats }),
+      })
+      if (!res.ok) throw new Error('failed')
+      const data = await res.json()
+      if (!data.analysis) throw new Error('failed')
+      setAiText(data.analysis)
+    } catch {
+      setAiError('分析に失敗しました。少し時間をおいてもう一度お試しください。')
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-xl font-bold">利用状況</h1>
         <Link href="/master" className="text-sm text-blue-600 border border-gray-200 rounded-full px-3 py-1.5 bg-white">⚙️ マスタ管理</Link>
+      </div>
+
+      {/* AI分析 */}
+      <div className="mb-4">
+        {!aiText && (
+          <button onClick={runAiAnalysis} disabled={aiLoading}
+            className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-3 rounded-xl font-semibold shadow-sm disabled:opacity-60 transition">
+            {aiLoading ? '分析中...（10秒ほどかかります）' : '🤖 AIに利用状況を分析してもらう'}
+          </button>
+        )}
+        {aiError && <p className="text-sm text-red-500 mt-2 text-center">{aiError}</p>}
+        {aiText && (
+          <section className="bg-white rounded-2xl border border-blue-100 shadow-sm p-4">
+            <div className="flex justify-between items-center mb-2">
+              <h2 className="font-bold text-gray-700">🤖 AI分析</h2>
+              <button onClick={runAiAnalysis} disabled={aiLoading}
+                className="text-xs text-blue-600 border border-gray-200 rounded-full px-3 py-1.5 bg-white disabled:opacity-50">
+                {aiLoading ? '分析中...' : 'もう一度分析'}
+              </button>
+            </div>
+            <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{aiText}</p>
+          </section>
+        )}
       </div>
 
       {/* サマリー */}
