@@ -213,7 +213,6 @@ export default function MasterPage() {
         <div className="flex gap-1.5">
           <Link href="/usage" className="text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">📊 利用状況</Link>
           <Link href="/tools" className="text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🧰 置き場道具管理</Link>
-          <Link href="/mahjong" className="text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🀄 待ち判定</Link>
         </div>
       </div>
 
