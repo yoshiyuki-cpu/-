@@ -2,38 +2,14 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
+import {
+  CAT_COLORS, DAYS_WINDOW, fetchUsageEvents, computeUsageMetrics, toAiPayload,
+  type Ev, type ProjectRow, type WorkerRow,
+} from '@/lib/usageStats'
 
-type Cat = '廃材' | 'スクラップ' | '人工' | '燃料代' | '車両代' | '経費'
-type Ev = { project_id: number; date: string; cat: Cat; worker_id?: number }
-type ProjectRow = { id: number; name: string; status: 'active' | 'completed' }
-type WorkerRow = { id: number; name: string }
-
-const CAT_COLORS: Record<Cat, string> = {
-  廃材: 'bg-red-400', スクラップ: 'bg-blue-400', 人工: 'bg-amber-400',
-  燃料代: 'bg-emerald-400', 車両代: 'bg-purple-400', 経費: 'bg-gray-400',
-}
-
-const DAYS_WINDOW = 90
-const RECENT_DAYS = 30
-const WEEKS = 8
-
-function toDate(s: string) {
-  const [y, m, d] = s.split('-').map(Number)
-  return new Date(y, m - 1, d)
-}
-
-function daysAgo(s: string) {
-  const now = new Date()
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  return Math.floor((today.getTime() - toDate(s).getTime()) / 86400000)
-}
-
-// その週の月曜日を返す
-function weekStart(d: Date) {
-  const r = new Date(d.getFullYear(), d.getMonth(), d.getDate())
-  const day = (r.getDay() + 6) % 7
-  r.setDate(r.getDate() - day)
-  return r
+function formatTimestamp(iso: string) {
+  const d = new Date(iso)
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
 export default function UsagePage() {
@@ -42,100 +18,37 @@ export default function UsagePage() {
   const [projects, setProjects] = useState<ProjectRow[]>([])
   const [workers, setWorkers] = useState<WorkerRow[]>([])
   const [aiText, setAiText] = useState('')
+  const [aiAt, setAiAt] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState('')
 
   useEffect(() => { load() }, [])
 
   async function load() {
-    const sinceDate = new Date()
-    sinceDate.setDate(sinceDate.getDate() - DAYS_WINDOW)
-    const since = sinceDate.toISOString().split('T')[0]
-
-    const [{ data: pj }, { data: wk }, { data: waste }, { data: labor }, { data: other }, { data: scrap }] = await Promise.all([
-      supabase.from('projects').select('id, name, status'),
-      supabase.from('workers').select('id, name'),
-      supabase.from('waste_entries').select('project_id, date, waste_types(entry_type)').gte('date', since),
-      supabase.from('labor_entries').select('project_id, date, worker_id').gte('date', since),
-      supabase.from('other_entries').select('project_id, date, entry_type').gte('date', since),
-      supabase.from('scrap_records').select('project_id, date').gte('date', since),
+    const [{ events: evs, projects: pj, workers: wk }, { data: latest }] = await Promise.all([
+      fetchUsageEvents(supabase),
+      supabase.from('usage_analyses').select('analysis, created_at').order('created_at', { ascending: false }).limit(1).maybeSingle(),
     ])
-
-    const evs: Ev[] = []
-    ;(waste ?? []).forEach((e: any) => {
-      evs.push({ project_id: e.project_id, date: e.date, cat: e.waste_types?.entry_type === 'revenue' ? 'スクラップ' : '廃材' })
-    })
-    ;(labor ?? []).forEach((e: any) => {
-      evs.push({ project_id: e.project_id, date: e.date, cat: '人工', worker_id: e.worker_id })
-    })
-    ;(other ?? []).forEach((e: any) => {
-      const cat: Cat = e.entry_type === 'labor' ? '人工' : e.entry_type === 'fuel' ? '燃料代' : e.entry_type === 'lease' ? '車両代' : '経費'
-      evs.push({ project_id: e.project_id, date: e.date, cat })
-    })
-    ;(scrap ?? []).forEach((e: any) => {
-      evs.push({ project_id: e.project_id, date: e.date, cat: 'スクラップ' })
-    })
-
-    setProjects(pj ?? [])
-    setWorkers(wk ?? [])
+    setProjects(pj)
+    setWorkers(wk)
     setEvents(evs)
+    if (latest) {
+      setAiText(latest.analysis)
+      setAiAt(latest.created_at)
+    }
     setLoading(false)
   }
 
   if (loading) return <p className="text-center py-10 text-gray-500">読み込み中...</p>
 
-  const recent = events.filter(e => daysAgo(e.date) < RECENT_DAYS)
-
-  // サマリー
-  const recentDays = new Set(recent.map(e => e.date)).size
-  const activeProjects = projects.filter(p => p.status === 'active')
-
-  // 週別件数（直近8週・月曜はじまり）
-  const thisWeek = weekStart(new Date())
-  const weeks = Array.from({ length: WEEKS }, (_, i) => {
-    const start = new Date(thisWeek)
-    start.setDate(start.getDate() - 7 * (WEEKS - 1 - i))
-    const end = new Date(start)
-    end.setDate(end.getDate() + 7)
-    const count = events.filter(e => {
-      const d = toDate(e.date)
-      return d >= start && d < end
-    }).length
-    return { label: `${start.getMonth() + 1}/${start.getDate()}〜`, count }
-  })
-  const maxWeek = Math.max(1, ...weeks.map(w => w.count))
-
-  // 種類別（直近30日）
-  const catCounts = (Object.keys(CAT_COLORS) as Cat[]).map(cat => ({
-    cat, count: recent.filter(e => e.cat === cat).length,
-  }))
-  const maxCat = Math.max(1, ...catCounts.map(c => c.count))
-
-  // 進行中現場ごとの最終入力
-  const lastByProject = activeProjects.map(p => {
-    const dates = events.filter(e => e.project_id === p.id).map(e => e.date).sort()
-    const last = dates[dates.length - 1]
-    return { ...p, last, ago: last ? daysAgo(last) : null }
-  }).sort((a, b) => (b.ago ?? 999) - (a.ago ?? 999))
-
-  // 作業員別 人工記録（直近30日）
-  const laborByWorker = workers.map(w => ({
-    ...w, count: recent.filter(e => e.cat === '人工' && e.worker_id === w.id).length,
-  })).filter(w => w.count > 0).sort((a, b) => b.count - a.count)
-  const maxWorker = Math.max(1, ...laborByWorker.map(w => w.count))
+  const { recent, recentDays, activeProjects, weeks, maxWeek, catCounts, maxCat, lastByProject, laborByWorker, maxWorker } =
+    computeUsageMetrics(events, projects, workers)
 
   async function runAiAnalysis() {
     setAiLoading(true)
     setAiError('')
     try {
-      const stats = {
-        today: new Date().toISOString().split('T')[0],
-        summary: { recent30Count: recent.length, daysWithInput: recentDays, activeProjectCount: activeProjects.length },
-        weekly: weeks,
-        byCategory: catCounts,
-        projectsLastInput: lastByProject.map(p => ({ name: p.name, ago: p.ago })),
-        workersLabor30d: laborByWorker.map(w => ({ name: w.name, days: w.count })),
-      }
+      const stats = toAiPayload(computeUsageMetrics(events, projects, workers))
       const res = await fetch('/api/analyze-usage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -145,6 +58,7 @@ export default function UsagePage() {
       const data = await res.json()
       if (!data.analysis) throw new Error('failed')
       setAiText(data.analysis)
+      setAiAt(new Date().toISOString())
     } catch {
       setAiError('分析に失敗しました。少し時間をおいてもう一度お試しください。')
     } finally {
@@ -178,6 +92,7 @@ export default function UsagePage() {
               </button>
             </div>
             <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{aiText}</p>
+            {aiAt && <p className="text-xs text-gray-400 mt-2 text-right">最終分析: {formatTimestamp(aiAt)}（毎朝自動でも更新されます）</p>}
           </section>
         )}
       </div>
