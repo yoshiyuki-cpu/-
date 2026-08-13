@@ -28,12 +28,13 @@ export type ForemanTarget = {
   worker_id: number
   name: string
   email: string | null
+  line_user_id: string | null
   projects: { id: number; name: string }[]
 }
 
 // is_foreman=trueの作業員を、担当現場（アクティブのみ）と一緒に取得する
 export async function fetchForemanTargets(supabase: SupabaseClient): Promise<ForemanTarget[]> {
-  const { data: foremen } = await supabase.from('workers').select('id, name, email').eq('is_foreman', true)
+  const { data: foremen } = await supabase.from('workers').select('id, name, email, line_user_id').eq('is_foreman', true)
   if (!foremen || foremen.length === 0) return []
 
   const { data: links } = await supabase
@@ -45,6 +46,7 @@ export async function fetchForemanTargets(supabase: SupabaseClient): Promise<For
     worker_id: f.id,
     name: f.name,
     email: f.email,
+    line_user_id: f.line_user_id,
     projects: (links ?? [])
       .filter((l: any) => l.worker_id === f.id && l.projects?.status === 'active')
       .map((l: any) => ({ id: l.projects.id, name: l.projects.name })),
@@ -82,6 +84,23 @@ export async function sendReminderPush(supabase: SupabaseClient, workerId: numbe
       }
     }
   }))
+}
+
+export async function sendLineMessage(lineUserId: string, text: string) {
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN
+  if (!token) return
+  const res = await fetch('https://api.line.me/v2/bot/message/push', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ to: lineUserId, messages: [{ type: 'text', text }] }),
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`LINE push failed: ${res.status} ${body}`)
+  }
 }
 
 export function projectUrl(path: string, projectId: number) {

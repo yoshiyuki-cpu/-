@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { fetchUsageEvents, computeUsageMetrics, toAiPayload, buildUsageAnalysisPrompt } from '@/lib/usageStats'
-import { fetchForemanTargets, sendReminderEmail, sendReminderPush, projectUrl } from '@/lib/notify'
+import { fetchForemanTargets, sendReminderEmail, sendReminderPush, sendLineMessage, projectUrl } from '@/lib/notify'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
@@ -44,6 +44,9 @@ async function runMorningReminder() {
     ]
     if (t.email) await sendReminderEmail(t.email, '【良心アプリ】本日の議事録・KY活動の入力をお願いします', lines)
     await sendReminderPush(supabase, t.worker_id, '議事録・KY活動の入力', '本日分の議事録・KY活動の記入をお願いします', projectUrl('minutes', t.projects[0].id))
+    if (t.line_user_id) {
+      try { await sendLineMessage(t.line_user_id, lines.join('\n')) } catch (e) { console.error('line send failed:', e) }
+    }
   }))
 
   return targets.length

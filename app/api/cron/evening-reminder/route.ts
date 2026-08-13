@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { fetchForemanTargets, sendReminderEmail, sendReminderPush, projectUrl } from '@/lib/notify'
+import { fetchForemanTargets, sendReminderEmail, sendReminderPush, sendLineMessage, projectUrl } from '@/lib/notify'
 
 export const maxDuration = 30
 
@@ -27,6 +27,9 @@ export async function GET(req: NextRequest) {
       ]
       if (t.email) await sendReminderEmail(t.email, '【良心アプリ】本日の工事台帳記入・写真貼り付けをお願いします', lines)
       await sendReminderPush(supabase, t.worker_id, '工事台帳の記入', '本日分の工事台帳記入・写真の貼り付けをお願いします', projectUrl('entry', t.projects[0].id))
+      if (t.line_user_id) {
+        try { await sendLineMessage(t.line_user_id, lines.join('\n')) } catch (e) { console.error('line send failed:', e) }
+      }
     }))
 
     return NextResponse.json({ ok: true, notified: targets.length })
