@@ -3,13 +3,16 @@ import { useEffect, useState } from 'react'
 import { supabase, DisposalSite, WasteType, CompanySettings, Vehicle, ScaffoldMaterialPrice, FuelPrice } from '@/lib/supabase'
 import Link from 'next/link'
 
-type Worker = { id: number; name: string; company_name: string | null }
+type Worker = { id: number; name: string; company_name: string | null; email: string | null; is_foreman: boolean }
+type ProjectOption = { id: number; name: string; status: 'active' | 'completed' }
 
 export default function MasterPage() {
   const [tab, setTab] = useState<'disposal' | 'worker' | 'vehicle' | 'scaffold' | 'fuel' | 'company'>('disposal')
   const [sites, setSites] = useState<DisposalSite[]>([])
   const [wasteTypes, setWasteTypes] = useState<(WasteType & { disposal_sites?: DisposalSite })[]>([])
   const [workers, setWorkers] = useState<Worker[]>([])
+  const [activeProjects, setActiveProjects] = useState<ProjectOption[]>([])
+  const [foremanProjectIds, setForemanProjectIds] = useState<Record<number, number[]>>({})
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [scaffoldPrices, setScaffoldPrices] = useState<ScaffoldMaterialPrice[]>([])
   const [newScaffoldUsage, setNewScaffoldUsage] = useState('')
@@ -19,7 +22,9 @@ export default function MasterPage() {
   const [newSiteName, setNewSiteName] = useState('')
   const [newWaste, setNewWaste] = useState({ name: '', unit: 'kg', unit_price: '', entry_type: 'cost' })
   const [editingPrice, setEditingPrice] = useState<{ id: number; price: string } | null>(null)
-  const [newWorker, setNewWorker] = useState({ name: '', company_name: '' })
+  const [newWorker, setNewWorker] = useState({ name: '', company_name: '', email: '', is_foreman: false })
+  const [editingWorkerId, setEditingWorkerId] = useState<number | null>(null)
+  const [editingWorkerProjectIds, setEditingWorkerProjectIds] = useState<number[]>([])
   const [newVehicle, setNewVehicle] = useState({ name: '', category: 'rental' as 'rental' | 'owned', default_price: '', unit: '日' })
   const [editingVehiclePrice, setEditingVehiclePrice] = useState<{ id: number; price: string } | null>(null)
   const [editingFuelPrice, setEditingFuelPrice] = useState<{ id: number; price: string } | null>(null)
@@ -30,7 +35,7 @@ export default function MasterPage() {
   useEffect(() => { loadAll() }, [])
 
   async function loadAll() {
-    const [{ data: s }, { data: w }, { data: wk }, { data: v }, { data: sp }, { data: fp }, { data: c }] = await Promise.all([
+    const [{ data: s }, { data: w }, { data: wk }, { data: v }, { data: sp }, { data: fp }, { data: c }, { data: pj }, { data: fpj }] = await Promise.all([
       supabase.from('disposal_sites').select('*').order('name'),
       supabase.from('waste_types').select('*, disposal_sites(name)').order('name'),
       supabase.from('workers').select('*').order('name'),
@@ -38,6 +43,8 @@ export default function MasterPage() {
       supabase.from('scaffold_material_prices').select('*').order('category').order('sort_order'),
       supabase.from('fuel_prices').select('*').order('fuel_type'),
       supabase.from('company_settings').select('*').eq('id', 1).single(),
+      supabase.from('projects').select('id, name, status').eq('status', 'active').order('name'),
+      supabase.from('foreman_projects').select('worker_id, project_id'),
     ])
     setSites(s ?? [])
     setWasteTypes((w as any) ?? [])
@@ -46,6 +53,12 @@ export default function MasterPage() {
     setScaffoldPrices(sp ?? [])
     setFuelPrices(fp ?? [])
     setCompany(c)
+    setActiveProjects(pj ?? [])
+    const grouped: Record<number, number[]> = {}
+    ;(fpj ?? []).forEach((l: any) => {
+      grouped[l.worker_id] = [...(grouped[l.worker_id] ?? []), l.project_id]
+    })
+    setForemanProjectIds(grouped)
   }
 
   async function updateScaffoldPrice(id: number, price: string) {
@@ -156,8 +169,10 @@ export default function MasterPage() {
     await supabase.from('workers').insert({
       name: newWorker.name,
       company_name: newWorker.company_name || null,
+      email: newWorker.email || null,
+      is_foreman: newWorker.is_foreman,
     })
-    setNewWorker({ name: '', company_name: '' })
+    setNewWorker({ name: '', company_name: '', email: '', is_foreman: false })
     loadAll()
   }
 
@@ -169,6 +184,29 @@ export default function MasterPage() {
       return
     }
     loadAll()
+  }
+
+  function startEditWorker(w: Worker) {
+    setEditingWorkerId(w.id)
+    setEditingWorkerProjectIds(foremanProjectIds[w.id] ?? [])
+  }
+
+  async function saveWorkerForeman(w: Worker, email: string, isForeman: boolean) {
+    await supabase.from('workers').update({ email: email || null, is_foreman: isForeman }).eq('id', w.id)
+    if (isForeman) {
+      await supabase.from('foreman_projects').delete().eq('worker_id', w.id)
+      if (editingWorkerProjectIds.length > 0) {
+        await supabase.from('foreman_projects').insert(
+          editingWorkerProjectIds.map(project_id => ({ worker_id: w.id, project_id }))
+        )
+      }
+    }
+    setEditingWorkerId(null)
+    loadAll()
+  }
+
+  function toggleEditingProject(id: number) {
+    setEditingWorkerProjectIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   }
 
   async function addVehicle() {
@@ -213,6 +251,7 @@ export default function MasterPage() {
         <div className="flex gap-1.5">
           <Link href="/usage" className="text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">📊 利用状況</Link>
           <Link href="/tools" className="text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🧰 置き場道具管理</Link>
+          <Link href="/notifications" className="text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🔔 通知設定</Link>
         </div>
       </div>
 
@@ -322,6 +361,10 @@ export default function MasterPage() {
       {tab === 'worker' && (
         <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
           <h2 className="font-bold mb-3 text-gray-700">作業員</h2>
+          <p className="text-xs text-gray-500 mb-3">
+            「職長」に設定すると、担当現場を選べます。担当現場が設定された職長には、朝7:50に議事録・KY活動、夕方17:30に工事台帳記入・写真貼り付けのリマインダー（メール・通知）が届きます。
+            メール送信には<Link href="/notifications" className="text-blue-600 underline">通知設定</Link>ページで本人の端末登録も必要です。
+          </p>
           <div className="border border-gray-200 rounded-xl p-3 mb-3 bg-gray-50">
             <p className="text-sm font-medium mb-2">新規作業員を追加</p>
             <div className="flex flex-col gap-2">
@@ -329,17 +372,65 @@ export default function MasterPage() {
                 onChange={e => setNewWorker({ ...newWorker, name: e.target.value })} placeholder="作業員名" />
               <input className="border border-gray-200 rounded-xl px-3 py-2 text-sm" value={newWorker.company_name}
                 onChange={e => setNewWorker({ ...newWorker, company_name: e.target.value })} placeholder="協力会社名（任意）" />
+              <input type="email" className="border border-gray-200 rounded-xl px-3 py-2 text-sm" value={newWorker.email}
+                onChange={e => setNewWorker({ ...newWorker, email: e.target.value })} placeholder="メールアドレス（任意）" />
+              <label className="flex items-center gap-2 text-sm text-gray-600">
+                <input type="checkbox" checked={newWorker.is_foreman}
+                  onChange={e => setNewWorker({ ...newWorker, is_foreman: e.target.checked })} />
+                職長として登録する
+              </label>
               <button onClick={addWorker} className="bg-blue-600 text-white py-2 rounded-lg text-sm">追加</button>
             </div>
           </div>
           <div className="flex flex-col gap-1">
             {workers.map(w => (
-              <div key={w.id} className="flex justify-between items-center text-sm py-2 border-b last:border-0">
-                <span>
-                  {w.name}
-                  {w.company_name && <span className="text-gray-500 ml-1">（{w.company_name}）</span>}
-                </span>
-                <button onClick={() => deleteWorker(w.id)} className="text-gray-300 hover:text-red-400 text-xs">削除</button>
+              <div key={w.id} className="py-2 border-b last:border-0">
+                <div className="flex justify-between items-center text-sm">
+                  <span>
+                    {w.name}
+                    {w.company_name && <span className="text-gray-500 ml-1">（{w.company_name}）</span>}
+                    {w.is_foreman && <span className="text-xs ml-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">職長</span>}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => startEditWorker(w)} className="text-blue-600 text-xs">設定</button>
+                    <button onClick={() => deleteWorker(w.id)} className="text-gray-300 hover:text-red-400 text-xs">削除</button>
+                  </div>
+                </div>
+                {w.email && <p className="text-xs text-gray-400 mt-0.5">{w.email}</p>}
+
+                {editingWorkerId === w.id && (
+                  <div className="mt-2 border border-gray-200 rounded-xl p-3 bg-gray-50 flex flex-col gap-2">
+                    <input type="email" className="border border-gray-200 rounded-xl px-3 py-2 text-sm" defaultValue={w.email ?? ''}
+                      id={`email-${w.id}`} placeholder="メールアドレス" />
+                    <label className="flex items-center gap-2 text-sm text-gray-600">
+                      <input type="checkbox" defaultChecked={w.is_foreman} id={`foreman-${w.id}`} />
+                      職長として登録する
+                    </label>
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">担当現場（アクティブな現場のみ表示）</p>
+                      <div className="flex flex-col gap-1">
+                        {activeProjects.length === 0 && <p className="text-xs text-gray-400">アクティブな現場がありません</p>}
+                        {activeProjects.map(p => (
+                          <label key={p.id} className="flex items-center gap-2 text-sm">
+                            <input type="checkbox" checked={editingWorkerProjectIds.includes(p.id)}
+                              onChange={() => toggleEditingProject(p.id)} />
+                            {p.name}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          const emailInput = document.getElementById(`email-${w.id}`) as HTMLInputElement
+                          const foremanInput = document.getElementById(`foreman-${w.id}`) as HTMLInputElement
+                          saveWorkerForeman(w, emailInput.value, foremanInput.checked)
+                        }}
+                        className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm">保存</button>
+                      <button onClick={() => setEditingWorkerId(null)} className="flex-1 border border-gray-300 text-gray-600 py-2 rounded-lg text-sm">キャンセル</button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
