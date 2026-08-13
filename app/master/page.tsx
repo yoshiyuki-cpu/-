@@ -25,6 +25,8 @@ export default function MasterPage() {
   const [newWorker, setNewWorker] = useState({ name: '', company_name: '', email: '', is_foreman: false })
   const [editingWorkerId, setEditingWorkerId] = useState<number | null>(null)
   const [editingWorkerProjectIds, setEditingWorkerProjectIds] = useState<number[]>([])
+  const [testSending, setTestSending] = useState<number | null>(null)
+  const [testResult, setTestResult] = useState<{ id: number; text: string } | null>(null)
   const [newVehicle, setNewVehicle] = useState({ name: '', category: 'rental' as 'rental' | 'owned', default_price: '', unit: '日' })
   const [editingVehiclePrice, setEditingVehiclePrice] = useState<{ id: number; price: string } | null>(null)
   const [editingFuelPrice, setEditingFuelPrice] = useState<{ id: number; price: string } | null>(null)
@@ -207,6 +209,32 @@ export default function MasterPage() {
 
   function toggleEditingProject(id: number) {
     setEditingWorkerProjectIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
+
+  async function sendTestNotification(workerId: number) {
+    setTestSending(workerId)
+    setTestResult(null)
+    try {
+      const res = await fetch('/api/notify-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workerId }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setTestResult({ id: workerId, text: `失敗: ${data.error ?? 'エラー'}` })
+      } else if (!data.hasEmail && !data.hasPush) {
+        setTestResult({ id: workerId, text: 'メールアドレス未登録・プッシュ通知未登録のため送信できません。' })
+      } else {
+        const parts: string[] = []
+        if (data.emailAttempted) parts.push(data.emailError ? `メール失敗(${data.emailError})` : 'メール送信済み')
+        if (data.pushAttempted) parts.push(data.pushError ? `通知失敗(${data.pushError})` : '通知送信済み')
+        setTestResult({ id: workerId, text: parts.join(' / ') })
+      }
+    } catch {
+      setTestResult({ id: workerId, text: '失敗: 通信エラー' })
+    }
+    setTestSending(null)
   }
 
   async function addVehicle() {
@@ -429,6 +457,13 @@ export default function MasterPage() {
                         className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm">保存</button>
                       <button onClick={() => setEditingWorkerId(null)} className="flex-1 border border-gray-300 text-gray-600 py-2 rounded-lg text-sm">キャンセル</button>
                     </div>
+                    <button onClick={() => sendTestNotification(w.id)} disabled={testSending === w.id}
+                      className="border border-blue-300 text-blue-600 py-2 rounded-lg text-sm disabled:opacity-50">
+                      {testSending === w.id ? '送信中...' : '📧 テスト送信（保存済みの内容へ）'}
+                    </button>
+                    {testResult?.id === w.id && (
+                      <p className="text-xs text-gray-600">{testResult.text}</p>
+                    )}
                   </div>
                 )}
               </div>
