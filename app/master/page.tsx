@@ -3,7 +3,10 @@ import { useEffect, useState } from 'react'
 import { supabase, DisposalSite, WasteType, CompanySettings, Vehicle, ScaffoldMaterialPrice, FuelPrice } from '@/lib/supabase'
 import Link from 'next/link'
 
-type Worker = { id: number; name: string; company_name: string | null; email: string | null; is_foreman: boolean }
+type Worker = {
+  id: number; name: string; company_name: string | null; email: string | null; is_foreman: boolean
+  line_user_id: string | null; line_link_code: string | null
+}
 type ProjectOption = { id: number; name: string; status: 'active' | 'completed' }
 
 export default function MasterPage() {
@@ -211,6 +214,18 @@ export default function MasterPage() {
     setEditingWorkerProjectIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   }
 
+  async function issueLineLinkCode(workerId: number) {
+    const code = Math.random().toString(36).slice(2, 8).toUpperCase()
+    await supabase.from('workers').update({ line_link_code: code, line_user_id: null }).eq('id', workerId)
+    loadAll()
+  }
+
+  async function unlinkLine(workerId: number) {
+    if (!confirm('LINEとの連携を解除しますか？')) return
+    await supabase.from('workers').update({ line_user_id: null, line_link_code: null }).eq('id', workerId)
+    loadAll()
+  }
+
   async function sendTestNotification(workerId: number) {
     setTestSending(workerId)
     setTestResult(null)
@@ -223,12 +238,13 @@ export default function MasterPage() {
       const data = await res.json()
       if (!res.ok) {
         setTestResult({ id: workerId, text: `失敗: ${data.error ?? 'エラー'}` })
-      } else if (!data.hasEmail && !data.hasPush) {
-        setTestResult({ id: workerId, text: 'メールアドレス未登録・プッシュ通知未登録のため送信できません。' })
+      } else if (!data.hasEmail && !data.hasPush && !data.hasLine) {
+        setTestResult({ id: workerId, text: 'メール・プッシュ通知・LINEのいずれも未登録のため送信できません。' })
       } else {
         const parts: string[] = []
         if (data.emailAttempted) parts.push(data.emailError ? `メール失敗(${data.emailError})` : 'メール送信済み')
         if (data.pushAttempted) parts.push(data.pushError ? `通知失敗(${data.pushError})` : '通知送信済み')
+        if (data.lineAttempted) parts.push(data.lineError ? `LINE失敗(${data.lineError})` : 'LINE送信済み')
         setTestResult({ id: workerId, text: parts.join(' / ') })
       }
     } catch {
@@ -446,6 +462,25 @@ export default function MasterPage() {
                           </label>
                         ))}
                       </div>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">LINE通知連携</p>
+                      {w.line_user_id ? (
+                        <div className="flex items-center justify-between text-sm bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                          <span className="text-green-700">連携済み</span>
+                          <button onClick={() => unlinkLine(w.id)} className="text-xs text-gray-400 hover:text-red-400">解除</button>
+                        </div>
+                      ) : w.line_link_code ? (
+                        <div className="text-sm bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                          <p className="text-gray-600 mb-1">本人にLINE公式アカウントを友達追加してもらい、下のコードをそのままトークで送ってもらってください。</p>
+                          <p className="font-mono text-lg font-bold text-amber-700">{w.line_link_code}</p>
+                          <button onClick={() => issueLineLinkCode(w.id)} className="text-xs text-blue-600 mt-1">コードを再発行</button>
+                        </div>
+                      ) : (
+                        <button onClick={() => issueLineLinkCode(w.id)} className="text-sm border border-gray-300 text-gray-600 rounded-lg px-3 py-2 w-full">
+                          連携コードを発行する
+                        </button>
+                      )}
                     </div>
                     <div className="flex gap-2">
                       <button
