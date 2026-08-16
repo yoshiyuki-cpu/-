@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { fetchForemanTargets, sendReminderEmail, sendReminderPush, sendLineMessage, projectUrl } from '@/lib/notify'
+import { fetchForemanTargets, sendReminderEmail, sendReminderPush, sendLineMessage, projectUrl, isJstSunday } from '@/lib/notify'
 
 export const maxDuration = 30
 
@@ -16,6 +16,8 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    if (isJstSunday()) return NextResponse.json({ ok: true, notified: 0, skipped: 'sunday' })
+
     const targets = await fetchForemanTargets(supabase)
 
     await Promise.all(targets.map(async t => {
