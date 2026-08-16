@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import BottomNav from "./BottomNav";
+import SplashScreen from "./SplashScreen";
 
 export const metadata: Metadata = {
   title: "良心アプリ",
@@ -15,6 +16,7 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <body className="min-h-screen">
+        <SplashScreen />
         <header className="no-print sticky top-0 z-30 bg-gradient-to-r from-slate-900 via-blue-900 to-blue-800 text-white px-4 py-3 shadow-md">
           <div className="max-w-2xl mx-auto flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-white/15 backdrop-blur flex items-center justify-center font-bold text-lg shadow-inner shrink-0">
