@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { href: '/estimates', label: '見積り', icon: '📄' },
   { href: '/scaffold', label: '足場計算', icon: '📐' },
   { href: '/attendance', label: '出面', icon: '🗓️' },
+  { href: '/calendar', label: '予定', icon: '📅' },
   { href: '/master', label: 'マスタ', icon: '⚙️' },
 ]
 
