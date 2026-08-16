@@ -125,8 +125,8 @@ export default function HomePage() {
           <div className="flex items-center gap-1.5 mb-2">
             <span className="text-[10px] tracking-[0.2em] text-blue-200/90 font-medium">OKAYAMA · DEMOLITION</span>
           </div>
-          <h1 className="text-[26px] leading-tight font-bold tracking-tight">
-            岡山の解体を、<br />一番たしかに。
+          <h1 className="text-[24px] leading-tight font-bold tracking-tight">
+            岡山で一番信頼される<br />解体会社を目指そう！！
           </h1>
           <p className="text-[13px] text-blue-100/80 mt-2 leading-relaxed">
             株式会社良心 ─ 安全第一・確実な施工で、地域の信頼に応えます。
