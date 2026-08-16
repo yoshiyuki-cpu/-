@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { fetchUsageEvents, computeUsageMetrics, toAiPayload, buildUsageAnalysisPrompt } from '@/lib/usageStats'
-import { fetchForemanTargets, sendReminderEmail, sendReminderPush, sendLineMessage, projectUrl } from '@/lib/notify'
+import { fetchForemanTargets, sendReminderEmail, sendReminderPush, sendLineMessage, projectUrl, isJstSunday } from '@/lib/notify'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
@@ -33,6 +33,8 @@ async function runUsageAnalysis() {
 }
 
 async function runMorningReminder() {
+  if (isJstSunday()) return 0
+
   const targets = await fetchForemanTargets(supabase)
 
   await Promise.all(targets.map(async t => {

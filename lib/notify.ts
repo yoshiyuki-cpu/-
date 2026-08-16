@@ -24,6 +24,12 @@ function getTransporter() {
   return transporter
 }
 
+// 日本時間で日曜日かどうか（サーバーはUTCで動くため、JSTの曜日をタイムゾーン変換で判定する）
+export function isJstSunday(now = new Date()) {
+  const jstWeekday = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Tokyo', weekday: 'short' }).format(now)
+  return jstWeekday === 'Sun'
+}
+
 export type ForemanTarget = {
   worker_id: number
   name: string
