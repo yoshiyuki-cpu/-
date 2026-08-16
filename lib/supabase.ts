@@ -228,6 +228,18 @@ export type ScaffoldMaterialPrice = {
   created_at: string
 }
 
+export type CalendarEventType = 'construction_start' | 'night_shift' | 'estimate' | 'other'
+
+export type CalendarEvent = {
+  id: number
+  title: string
+  event_type: CalendarEventType
+  event_date: string
+  note: string | null
+  notify_all: boolean
+  created_at: string
+}
+
 export type CompanySettings = {
   id: number
   name: string
