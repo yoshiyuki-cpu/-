@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import RyoshinLogo from './RyoshinLogo'
 
 const SEEN_KEY = 'ryoshin-splash-seen'
 
@@ -48,9 +49,7 @@ export default function SplashScreen() {
       </div>
 
       <div className="relative flex flex-col items-center px-8 text-center">
-        <div className="w-20 h-20 rounded-3xl bg-white/15 backdrop-blur flex items-center justify-center text-4xl font-bold shadow-inner mb-5">
-          良
-        </div>
+        <RyoshinLogo className="w-24 h-24 rounded-3xl shadow-lg mb-5" />
 
         <p className="text-[11px] tracking-[0.3em] text-blue-200/90 font-medium mb-3">
           OKAYAMA · DEMOLITION
