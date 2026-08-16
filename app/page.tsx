@@ -98,6 +98,57 @@ export default function HomePage() {
 
   return (
     <div>
+      {/* 表紙：会社の顔となるヒーロー */}
+      <section className="no-print relative overflow-hidden rounded-3xl mb-5 bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900 text-white shadow-lg">
+        {/* 背景の重機シルエットと光 */}
+        <div aria-hidden className="pointer-events-none absolute inset-0">
+          {/* 右上から差す光 */}
+          <div className="absolute -top-20 -right-10 w-64 h-64 rounded-full bg-blue-400/20 blur-3xl" />
+          {/* 重機シルエット（右上に小さく配置し、数値カードと重ならないようにする） */}
+          <svg viewBox="0 0 200 120" className="absolute right-1 top-2 h-24 w-auto text-white/[0.09]" fill="currentColor">
+            {/* ブーム（本体から斜め上へ） */}
+            <path d="M126 62 L92 22 L102 14 L138 56 Z" />
+            {/* アーム（ブーム先端から前下へ） */}
+            <path d="M96 18 L54 48 L62 60 L104 30 Z" />
+            {/* バケット */}
+            <path d="M58 44 L74 62 L60 74 L40 66 L42 48 Z" />
+            {/* 運転席 */}
+            <path d="M132 34 L164 34 L168 58 L132 58 Z" />
+            {/* 本体 */}
+            <rect x="118" y="58" width="66" height="26" rx="5" />
+            {/* クローラー */}
+            <rect x="112" y="86" width="80" height="18" rx="9" />
+          </svg>
+        </div>
+
+        <div className="relative px-5 py-6">
+          <div className="flex items-center gap-1.5 mb-2">
+            <span className="text-[10px] tracking-[0.2em] text-blue-200/90 font-medium">OKAYAMA · DEMOLITION</span>
+          </div>
+          <h1 className="text-[26px] leading-tight font-bold tracking-tight">
+            岡山の解体を、<br />一番たしかに。
+          </h1>
+          <p className="text-[13px] text-blue-100/80 mt-2 leading-relaxed">
+            株式会社良心 ─ 安全第一・確実な施工で、地域の信頼に応えます。
+          </p>
+
+          <div className="grid grid-cols-3 gap-2 mt-5">
+            <div className="rounded-2xl bg-white/10 backdrop-blur-sm px-3 py-2.5 border border-white/10">
+              <p className="text-[10px] text-blue-200/80">稼働中の現場</p>
+              <p className="text-xl font-bold leading-tight">{activeCount}<span className="text-xs font-medium ml-0.5">件</span></p>
+            </div>
+            <div className="rounded-2xl bg-white/10 backdrop-blur-sm px-3 py-2.5 border border-white/10">
+              <p className="text-[10px] text-blue-200/80">完了実績</p>
+              <p className="text-xl font-bold leading-tight">{completedCount}<span className="text-xs font-medium ml-0.5">件</span></p>
+            </div>
+            <div className="rounded-2xl bg-white/10 backdrop-blur-sm px-3 py-2.5 border border-white/10">
+              <p className="text-[10px] text-blue-200/80">累計現場</p>
+              <p className="text-xl font-bold leading-tight">{projects.length}<span className="text-xs font-medium ml-0.5">件</span></p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <div className="flex justify-between items-center mb-4">
         <div>
           <h1 className="text-xl font-bold">現場一覧</h1>
