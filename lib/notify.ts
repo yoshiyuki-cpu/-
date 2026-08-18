@@ -85,18 +85,64 @@ export async function fetchPrTargets(supabase: SupabaseClient): Promise<PrTarget
   }))
 }
 
-// 担当している媒体に応じた依頼文を組み立てる
-export function buildPrReminderLines(t: Pick<PrTarget, 'name' | 'google_ads' | 'x_pr'>) {
-  const tasks: string[] = []
-  if (t.google_ads) tasks.push('・Google広告の掲載')
-  if (t.x_pr) tasks.push('・X（旧Twitter）への投稿')
+// Xの投稿ネタ。毎日同じ一覧を送ると読み飛ばされるので、日替わりで today's ネタを1つ先頭に出す。
+const X_POST_IDEAS = [
+  '現場の進捗（例：◯◯町の解体、本日で上屋解体が完了しました）',
+  'ビフォーアフター（完工した現場の写真を並べる）',
+  '重機・道具の紹介（どんな現場で使うかを一言添える）',
+  '安全活動の様子（朝礼・KY活動の写真）',
+  '解体の豆知識（費用が上がる家の特徴、アスベスト調査の義務など）',
+  '地域の話題（空き家問題、補助金制度、台風後の対応）',
+]
 
-  return [
+// 担当している媒体に応じた依頼文とチェックリストを組み立てる。
+// 媒体ごとに実際の作業が違う（Xは投稿・Google広告は点検）ため、節を分けて書く。
+export function buildPrReminderLines(
+  t: Pick<PrTarget, 'name' | 'google_ads' | 'x_pr'>,
+  now = new Date(),
+) {
+  const lines = [
     `${t.name}さん、本日もお疲れさまです。`,
     '本日分の広報をお願いします。',
-    '',
-    ...tasks,
   ]
+
+  if (t.x_pr) {
+    // 日付から選ぶことで、同じ日は誰に送っても同じネタ・翌日は別のネタになる
+    const jstDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' }).format(now)
+    const dayIndex = Math.floor(new Date(jstDate).getTime() / 86400000) % X_POST_IDEAS.length
+
+    lines.push(
+      '',
+      '━━━━━━━━━━━━',
+      '【X（旧Twitter）】1投稿',
+      '',
+      `今日のおすすめネタ：${X_POST_IDEAS[dayIndex]}`,
+      '',
+      '・写真は良心アプリの議事録・KY活動から選べます',
+      `　${APP_URL}`,
+      '・迷ったら他のネタでもOK（進捗／ビフォーアフター／重機／安全活動／豆知識／地域の話題）',
+      '',
+      '※施主の許可がある写真だけ使ってください。',
+      '　住所・表札・車のナンバーが写っていないか確認を。',
+    )
+  }
+
+  if (t.google_ads) {
+    lines.push(
+      '',
+      '━━━━━━━━━━━━',
+      '【Google広告】点検5分',
+      '',
+      '・昨日の費用が想定内か',
+      '・検索キーワードを見て、仕事につながらない語は除外に追加',
+      '　（例：「解体 求人」「解体 ゲーム」）',
+      '・問い合わせ・電話の件数を記録',
+      '',
+      '※広告文や地域設定（岡山市・倉敷市など）の見直しは週1回でOK',
+    )
+  }
+
+  return lines
 }
 
 export async function sendReminderEmail(to: string, subject: string, bodyLines: string[]) {
