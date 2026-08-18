@@ -59,6 +59,46 @@ export async function fetchForemanTargets(supabase: SupabaseClient): Promise<For
   })).filter(f => f.projects.length > 0)
 }
 
+export type PrTarget = {
+  worker_id: number
+  name: string
+  email: string | null
+  line_user_id: string | null
+  google_ads: boolean
+  x_pr: boolean
+}
+
+// 広報担当（Google広告・X）の作業員を取得する。職長と違い担当現場の割り当ては不要。
+export async function fetchPrTargets(supabase: SupabaseClient): Promise<PrTarget[]> {
+  const { data } = await supabase
+    .from('workers')
+    .select('id, name, email, line_user_id, is_google_ads, is_x_pr')
+    .or('is_google_ads.eq.true,is_x_pr.eq.true')
+
+  return (data ?? []).map(w => ({
+    worker_id: w.id,
+    name: w.name,
+    email: w.email,
+    line_user_id: w.line_user_id,
+    google_ads: w.is_google_ads,
+    x_pr: w.is_x_pr,
+  }))
+}
+
+// 担当している媒体に応じた依頼文を組み立てる
+export function buildPrReminderLines(t: Pick<PrTarget, 'name' | 'google_ads' | 'x_pr'>) {
+  const tasks: string[] = []
+  if (t.google_ads) tasks.push('・Google広告の掲載')
+  if (t.x_pr) tasks.push('・X（旧Twitter）への投稿')
+
+  return [
+    `${t.name}さん、本日もお疲れさまです。`,
+    '本日分の広報をお願いします。',
+    '',
+    ...tasks,
+  ]
+}
+
 export async function sendReminderEmail(to: string, subject: string, bodyLines: string[]) {
   const t = getTransporter()
   if (!t) return
