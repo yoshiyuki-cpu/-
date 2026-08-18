@@ -5,6 +5,7 @@ import Link from 'next/link'
 
 type Worker = {
   id: number; name: string; company_name: string | null; email: string | null; is_foreman: boolean
+  is_google_ads: boolean; is_x_pr: boolean
   line_user_id: string | null; line_link_code: string | null
 }
 type ProjectOption = { id: number; name: string; status: 'active' | 'completed' }
@@ -196,8 +197,13 @@ export default function MasterPage() {
     setEditingWorkerProjectIds(foremanProjectIds[w.id] ?? [])
   }
 
-  async function saveWorkerForeman(w: Worker, email: string, isForeman: boolean) {
-    await supabase.from('workers').update({ email: email || null, is_foreman: isForeman }).eq('id', w.id)
+  async function saveWorkerForeman(w: Worker, email: string, isForeman: boolean, isGoogleAds: boolean, isXPr: boolean) {
+    await supabase.from('workers').update({
+      email: email || null,
+      is_foreman: isForeman,
+      is_google_ads: isGoogleAds,
+      is_x_pr: isXPr,
+    }).eq('id', w.id)
     if (isForeman) {
       await supabase.from('foreman_projects').delete().eq('worker_id', w.id)
       if (editingWorkerProjectIds.length > 0) {
@@ -434,6 +440,8 @@ export default function MasterPage() {
                     {w.name}
                     {w.company_name && <span className="text-gray-500 ml-1">（{w.company_name}）</span>}
                     {w.is_foreman && <span className="text-xs ml-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">職長</span>}
+                    {w.is_google_ads && <span className="text-xs ml-1 px-1.5 py-0.5 rounded bg-sky-100 text-sky-700">Google広告</span>}
+                    {w.is_x_pr && <span className="text-xs ml-1 px-1.5 py-0.5 rounded bg-gray-800 text-white">X</span>}
                   </span>
                   <div className="flex items-center gap-2">
                     <button onClick={() => startEditWorker(w)} className="text-blue-600 text-xs">設定</button>
@@ -450,6 +458,19 @@ export default function MasterPage() {
                       <input type="checkbox" defaultChecked={w.is_foreman} id={`foreman-${w.id}`} />
                       職長として登録する
                     </label>
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">広報の担当（夕方17:30に依頼が届きます）</p>
+                      <div className="flex flex-col gap-1">
+                        <label className="flex items-center gap-2 text-sm text-gray-600">
+                          <input type="checkbox" defaultChecked={w.is_google_ads} id={`gads-${w.id}`} />
+                          Google広告の掲載
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-gray-600">
+                          <input type="checkbox" defaultChecked={w.is_x_pr} id={`xpr-${w.id}`} />
+                          X（旧Twitter）への投稿
+                        </label>
+                      </div>
+                    </div>
                     <div>
                       <p className="text-xs text-gray-500 mb-1">担当現場（アクティブな現場のみ表示）</p>
                       <div className="flex flex-col gap-1">
@@ -487,7 +508,9 @@ export default function MasterPage() {
                         onClick={() => {
                           const emailInput = document.getElementById(`email-${w.id}`) as HTMLInputElement
                           const foremanInput = document.getElementById(`foreman-${w.id}`) as HTMLInputElement
-                          saveWorkerForeman(w, emailInput.value, foremanInput.checked)
+                          const gadsInput = document.getElementById(`gads-${w.id}`) as HTMLInputElement
+                          const xprInput = document.getElementById(`xpr-${w.id}`) as HTMLInputElement
+                          saveWorkerForeman(w, emailInput.value, foremanInput.checked, gadsInput.checked, xprInput.checked)
                         }}
                         className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm">保存</button>
                       <button onClick={() => setEditingWorkerId(null)} className="flex-1 border border-gray-300 text-gray-600 py-2 rounded-lg text-sm">キャンセル</button>
