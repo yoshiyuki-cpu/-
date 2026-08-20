@@ -412,8 +412,10 @@ export default function MasterPage() {
         <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
           <h2 className="font-bold mb-3 text-gray-700">作業員</h2>
           <p className="text-xs text-gray-500 mb-3">
-            「職長」に設定すると、担当現場を選べます。担当現場が設定された職長には、朝7:50に議事録・KY活動、夕方17:30に工事台帳記入・写真貼り付けのリマインダー（メール・通知）が届きます。
-            メール送信には<Link href="/notifications" className="text-blue-600 underline">通知設定</Link>ページで本人の端末登録も必要です。
+            「職長」に設定すると担当現場を選べます。担当現場のある職長には、朝7:50に議事録・KY活動、夕方17:30に工事台帳記入・写真貼り付けのリマインダーが届きます。
+            「広報の担当」を設定した集客担当には、夕方17:30にGoogle広告・Xの依頼が届きます。
+            メールはここでアドレスを登録すれば届きます。スマホのプッシュ通知を使う場合は、本人の端末で
+            <Link href="/notifications" className="text-blue-600 underline">通知設定</Link>ページを開いて有効にしてもらってください。
           </p>
           <div className="border border-gray-200 rounded-xl p-3 mb-3 bg-gray-50">
             <p className="text-sm font-medium mb-2">新規作業員を追加</p>
