@@ -4,57 +4,17 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase, Project, ScaffoldPlan, ScaffoldSegment, ScaffoldMaterialPrice } from '@/lib/supabase'
 
+import {
+  STANDARD_LENGTHS, type Side, type SideResult,
+  rectSides, calcSideResults, calcTatejiPipes, calcNunoPipes, calcJointCount,
+} from '@/lib/scaffoldCalc'
+
 type InputMode = 'directions' | 'rect' | 'perimeter' | 'trace'
 type UsageRow = { key: string; label: string; count: string }
-type Side = { label: string; length: number; height: number }
-type SideResult = Side & { spanCount: number; levelCount: number; tateji: number; nuno: number }
 type Point = { x: number; y: number }
 type Wall = { length: string; turn: 'straight' | 'left' | 'right' | 'custom'; angle: string }
 
-// 単管の規格長（大きい順）
-const STANDARD_LENGTHS = [6, 4, 3, 2, 1]
 const USAGE_PRESETS = ['筋交い', '手すり', '幅木', 'ジョイント', 'ベース金具']
-
-// 対象の部材1本分を規格長の単管で構成した場合の本数内訳を返す
-// ・規格長の最大値以下に収まる場合、preferLongestがtrueなら長い単管を優先して最大長の規格を1本選ぶ（建地向け。短い部材を継ぐのは非現実的なため）。
-//   falseならこれまで通り無駄の少ない最小の規格を1本選ぶ（布向け。スパン間隔ちょうどの短い単管で足りるのに長尺を使うと過剰になるため）
-// ・規格長の最大値を超える場合は、大きい規格から順に継ぎ足す（両方共通）
-function pipeBreakdown(target: number, lengths: number[], preferLongest: boolean): Record<number, number> {
-  if (target <= 0) return {}
-  const descending = [...lengths].sort((a, b) => b - a)
-  const maxLen = descending[0]
-
-  if (target <= maxLen) {
-    if (preferLongest) return { [maxLen]: 1 }
-    const chosen = [...descending].reverse().find(l => l >= target - 1e-9) ?? maxLen
-    return { [chosen]: 1 }
-  }
-
-  let remaining = target
-  const counts: Record<number, number> = {}
-  for (const len of descending) {
-    const count = Math.floor(remaining / len + 1e-9)
-    if (count > 0) {
-      counts[len] = count
-      remaining -= count * len
-    }
-  }
-  if (remaining > 1e-9) {
-    const minLen = descending[descending.length - 1]
-    counts[minLen] = (counts[minLen] ?? 0) + 1
-  }
-  return counts
-}
-
-function scalePipeCounts(perUnit: Record<number, number>, units: number): Record<number, number> {
-  return Object.fromEntries(Object.entries(perUnit).map(([len, count]) => [len, count * units]))
-}
-
-function addPipeCounts(a: Record<number, number>, b: Record<number, number>): Record<number, number> {
-  const result = { ...a }
-  Object.entries(b).forEach(([len, count]) => { result[Number(len)] = (result[Number(len)] ?? 0) + count })
-  return result
-}
 
 function dist(a: Point, b: Point) {
   return Math.hypot(a.x - b.x, a.y - b.y)
@@ -510,8 +470,8 @@ export default function ProjectScaffoldCalcPage() {
       }))
     : []
 
-  // 東西南北個別入力・図面トレースの場合は、辺（区間）ごとに長さ・高さが違う前提でスパン数・段数を計算する。
-  // それ以外のモードは建物全体を1つの辺として扱い、これまでと同じ計算結果になる
+  // 辺（区間）ごとに長さ・高さが違う前提でスパン数・段数を計算する。
+  // 縦×横も4辺に展開する（全周をまとめて割ると角に建地が立たず本数が足りなくなるため）
   const sides: Side[] =
     mode === 'directions'
       ? [
@@ -522,26 +482,19 @@ export default function ProjectScaffoldCalcPage() {
         ]
       : mode === 'trace'
       ? traceSides
+      : mode === 'rect'
+      ? rectSides(Number(depth) || 0, Number(width) || 0, h)
       : [{ label: '全周', length: perimeter, height: h }]
 
-  const sideResults: SideResult[] = sides.map(s => {
-    const spanCount = span > 0 && s.length > 0 ? Math.ceil(s.length / span) : 0
-    const levelCount = level > 0 && s.height > 0 ? Math.ceil(s.height / level) : 0
-    return { ...s, spanCount, levelCount, tateji: spanCount, nuno: spanCount * levelCount }
-  })
+  const sideResults: SideResult[] = calcSideResults(sides, span, level)
 
   const spanCount = sideResults.reduce((sum, s) => sum + s.spanCount, 0)
   const tatejiCount = spanCount
   const nunoCount = sideResults.reduce((sum, s) => sum + s.nuno, 0)
 
-  const tatejiPipes = sideResults.reduce(
-    (acc, s) => addPipeCounts(acc, scalePipeCounts(pipeBreakdown(s.height, STANDARD_LENGTHS, true), s.tateji)),
-    {} as Record<number, number>,
-  )
-  const nunoPipes = sideResults.reduce(
-    (acc, s) => addPipeCounts(acc, scalePipeCounts(pipeBreakdown(span, STANDARD_LENGTHS, false), s.nuno)),
-    {} as Record<number, number>,
-  )
+  const tatejiPipes = calcTatejiPipes(sideResults)
+  const nunoPipes = calcNunoPipes(sideResults)
+  const jointCount = calcJointCount(sideResults)
   const totalPipes = Object.fromEntries(
     STANDARD_LENGTHS.map(len => [len, (tatejiPipes[len] ?? 0) + (nunoPipes[len] ?? 0)])
   )
@@ -560,11 +513,13 @@ export default function ProjectScaffoldCalcPage() {
 
   const cornerKinds = classifyCorners(vertices)
 
-  // ベース金具は建地と同数、幅木・手すりは布と同数を初期値として提案する（現場でそのまま変更可能）
+  // ベース金具は建地と同数、ジョイントは継手数から自動算出する。
+  // 幅木・手すりは作業床のある段だけに入るもので段数が現場によって違うため、1周ぶんを初期値にする
   const usagePresetDefaultCount: Record<string, string> = {
     'ベース金具': tatejiCount > 0 ? String(tatejiCount) : '',
-    '幅木': nunoCount > 0 ? String(nunoCount) : '',
-    '手すり': nunoCount > 0 ? String(nunoCount) : '',
+    'ジョイント': jointCount > 0 ? String(jointCount) : '',
+    '幅木': spanCount > 0 ? String(spanCount) : '',
+    '手すり': spanCount > 0 ? String(spanCount) : '',
   }
 
   function addUsageRow(label = '', count = '') {
@@ -1055,7 +1010,7 @@ export default function ProjectScaffoldCalcPage() {
             </tbody>
           </table>
           <p className="text-xs text-gray-400 mt-3">
-            建地は辺（または全体）の高さを規格長で継いだ場合の内訳、布は1本あたりスパン間隔{span || 0}mに収まる規格1本の内訳です。
+            建地は辺の高さ、布は辺の長さを規格長の単管で通して継いだ場合の内訳です。どちらも必要な長さをまかなえる最小の規格を選びます。
           </p>
         </div>
       )}
@@ -1092,7 +1047,7 @@ export default function ProjectScaffoldCalcPage() {
       <div className="bg-white rounded-lg shadow p-4 mt-4">
         <h2 className="font-bold mb-3 text-gray-700">用途別本数（手入力）</h2>
         <p className="text-xs text-gray-400 mb-3">
-          ベース金具は建地本数、幅木・手すりは布本数を初期値として入力しています（現場に合わせて変更してください）。
+          ベース金具は建地本数、ジョイントは継手数を初期値にしています。幅木・手すりは作業床のある段だけに入るため1周ぶん（{spanCount}本）を初期値にしています。段数に応じて変更してください。
         </p>
         <div className="flex flex-wrap gap-2 mb-3">
           {USAGE_PRESETS.map(p => (
