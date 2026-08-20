@@ -39,6 +39,32 @@ export function pipeBreakdown(target: number, lengths: number[]): Record<number,
   return counts
 }
 
+// 建地に使う単管を指定された場合の内訳。
+// 解体の養生足場では、建物が低くても埃を抑えるために長い建地をあえて立てるので、
+// 高さに対して過剰な規格でもそのまま使えるようにする（6m指定・高さ2.5m → 6m×1本）。
+// 指定より高い場合は指定の規格を継ぎ、端数だけ他の規格で埋める。
+export function pipeBreakdownFixed(target: number, preferred: number, lengths: number[]): Record<number, number> {
+  if (target <= 0 || preferred <= 0) return {}
+  const descending = [...lengths].sort((a, b) => b - a)
+  if (preferred >= target - 1e-9) return { [preferred]: 1 }
+
+  const count = Math.floor(target / preferred + 1e-9)
+  const counts: Record<number, number> = { [preferred]: count }
+  const remaining = target - count * preferred
+  if (remaining > 1e-9) {
+    const len = smallestCovering(remaining, descending)
+    counts[len] = (counts[len] ?? 0) + 1
+  }
+  return counts
+}
+
+// 建地1本ぶんの内訳。規格を指定していなければ高さに合わせて自動で選ぶ
+function tatejiBreakdown(height: number, fixedLength: number | null): Record<number, number> {
+  return fixedLength
+    ? pipeBreakdownFixed(height, fixedLength, STANDARD_LENGTHS)
+    : pipeBreakdown(height, STANDARD_LENGTHS)
+}
+
 export function scalePipeCounts(perUnit: Record<number, number>, units: number): Record<number, number> {
   return Object.fromEntries(Object.entries(perUnit).map(([len, count]) => [len, count * units]))
 }
@@ -73,9 +99,9 @@ export function calcSideResults(sides: Side[], span: number, level: number): Sid
 }
 
 // 建地：1本あたり「その辺の高さ」を規格長で継いだ内訳を、辺の建地本数ぶん積む
-export function calcTatejiPipes(sideResults: SideResult[]): Record<number, number> {
+export function calcTatejiPipes(sideResults: SideResult[], fixedLength: number | null = null): Record<number, number> {
   return sideResults.reduce(
-    (acc, s) => addPipeCounts(acc, scalePipeCounts(pipeBreakdown(s.height, STANDARD_LENGTHS), s.tateji)),
+    (acc, s) => addPipeCounts(acc, scalePipeCounts(tatejiBreakdown(s.height, fixedLength), s.tateji)),
     {} as Record<number, number>,
   )
 }
@@ -90,9 +116,9 @@ export function calcNunoPipes(sideResults: SideResult[]): Record<number, number>
 }
 
 // 継手の数。1本の部材を n 本の単管で構成すると継手は n-1 箇所になる。
-export function calcJointCount(sideResults: SideResult[]): number {
+export function calcJointCount(sideResults: SideResult[], fixedLength: number | null = null): number {
   return sideResults.reduce((sum, s) => {
-    const tatejiJoints = Math.max(0, pieceCount(pipeBreakdown(s.height, STANDARD_LENGTHS)) - 1) * s.tateji
+    const tatejiJoints = Math.max(0, pieceCount(tatejiBreakdown(s.height, fixedLength)) - 1) * s.tateji
     const nunoJoints = Math.max(0, pieceCount(pipeBreakdown(s.length, STANDARD_LENGTHS)) - 1) * s.levelCount
     return sum + tatejiJoints + nunoJoints
   }, 0)
