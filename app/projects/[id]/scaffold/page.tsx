@@ -146,6 +146,8 @@ export default function ProjectScaffoldCalcPage() {
   const [height, setHeight] = useState('')
   const [spanInterval, setSpanInterval] = useState('1.8')
   const [levelHeight, setLevelHeight] = useState('1.8')
+  // 建地の規格を直接指定できるようにする（nullなら高さに合わせて自動選択）
+  const [tatejiLength, setTatejiLength] = useState<number | null>(null)
   const [usageRows, setUsageRows] = useState<UsageRow[]>([])
 
   // 図面トレース（Phase 2）
@@ -492,9 +494,9 @@ export default function ProjectScaffoldCalcPage() {
   const tatejiCount = spanCount
   const nunoCount = sideResults.reduce((sum, s) => sum + s.nuno, 0)
 
-  const tatejiPipes = calcTatejiPipes(sideResults)
+  const tatejiPipes = calcTatejiPipes(sideResults, tatejiLength)
   const nunoPipes = calcNunoPipes(sideResults)
-  const jointCount = calcJointCount(sideResults)
+  const jointCount = calcJointCount(sideResults, tatejiLength)
   const totalPipes = Object.fromEntries(
     STANDARD_LENGTHS.map(len => [len, (tatejiPipes[len] ?? 0) + (nunoPipes[len] ?? 0)])
   )
@@ -921,6 +923,25 @@ export default function ProjectScaffoldCalcPage() {
             <input type="number" inputMode="decimal" step="0.1" className={inputClass} value={levelHeight}
               onChange={e => setLevelHeight(e.target.value)} />
           </div>
+        </div>
+
+        <div className="mt-3">
+          <label className="block text-sm font-medium mb-1">建地に使う単管</label>
+          <div className="flex gap-1.5 flex-wrap">
+            {([null, ...STANDARD_LENGTHS] as (number | null)[]).map(len => (
+              <button key={len ?? 'auto'} type="button" onClick={() => setTatejiLength(len)}
+                className={`px-3 py-1.5 rounded-full text-sm font-medium border transition ${
+                  tatejiLength === len ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300'
+                }`}>
+                {len === null ? '自動' : `${len}m`}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-gray-500 mt-1">
+            {tatejiLength === null
+              ? '高さをまかなえる最小の規格を選びます。'
+              : `高さに関わらず${tatejiLength}m単管で建地を立てます（養生で建物より高く立ち上げる場合など）。足りない分は継ぎ足します。`}
+          </p>
         </div>
 
         <div className="flex items-center gap-3">
