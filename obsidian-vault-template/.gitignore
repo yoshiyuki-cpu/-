@@ -1,0 +1,9 @@
+# Obsidian のローカル設定（端末ごとに変わるもの）
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache
+.trash/
+
+# OS が勝手に作るファイル
+.DS_Store
+Thumbs.db

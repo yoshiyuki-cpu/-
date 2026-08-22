@@ -28,8 +28,9 @@ MCP サーバー方式（Claude Desktop から Vault を読む）は PC が起�
 
 1. **Obsidian をインストール**（PC）— https://obsidian.md からダウンロード
 2. **新しい Vault を作成** — 名前は `ryoshin-notes` など。保存場所はホームフォルダ直下が扱いやすい
-3. **GitHub に空のプライベートリポジトリを作成** — 名前は Vault と揃えて `ryoshin-notes`
-4. **Vault フォルダを Git リポジトリにする**（PC のターミナルで、Vault フォルダに移動してから）
+3. **Vault の中身に雛形を入れる** — このリポジトリの [`obsidian-vault-template/`](../obsidian-vault-template/) の中身（フォルダ構成・テンプレート・見本ノート）を、作った Vault フォルダにコピーする
+4. **GitHub に空のプライベートリポジトリを作成** — 名前は Vault と揃えて `ryoshin-notes`。README などは追加せず空のままにする
+5. **Vault フォルダを Git リポジトリにする**（PC のターミナルで、Vault フォルダに移動してから）
 
    ```bash
    git init
@@ -40,8 +41,8 @@ MCP サーバー方式（Claude Desktop から Vault を読む）は PC が起�
    git push -u origin main
    ```
 
-5. **Obsidian Git プラグインを入れる** — Obsidian の 設定 → コミュニティプラグイン → 制限モードをオフ → 「Obsidian Git」を検索してインストール・有効化
-6. **自動同期を設定** — プラグイン設定で以下を指定する
+6. **Obsidian Git プラグインを入れる** — Obsidian の 設定 → コミュニティプラグイン → 制限モードをオフ → 「Obsidian Git」を検索してインストール・有効化
+7. **自動同期を設定** — プラグイン設定で以下を指定する
    - `Vault backup interval (minutes)`: `10`（10分ごとに自動コミット・プッシュ）
    - `Auto pull on startup`: オン（起動時に他端末の変更を取り込む）
 
