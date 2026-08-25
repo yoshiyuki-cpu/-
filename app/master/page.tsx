@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { supabase, DisposalSite, WasteType, CompanySettings, Vehicle, ScaffoldMaterialPrice, FuelPrice } from '@/lib/supabase'
+import { supabase, DisposalSite, WasteType, CompanySettings, Vehicle, ScaffoldMaterialPrice, FuelPrice, SupportCompany } from '@/lib/supabase'
 import Link from 'next/link'
 
 type Worker = {
@@ -11,11 +11,13 @@ type Worker = {
 type ProjectOption = { id: number; name: string; status: 'active' | 'completed' }
 
 export default function MasterPage() {
-  const [tab, setTab] = useState<'disposal' | 'worker' | 'vehicle' | 'scaffold' | 'fuel' | 'company'>('disposal')
+  const [tab, setTab] = useState<'disposal' | 'worker' | 'support' | 'vehicle' | 'scaffold' | 'fuel' | 'company'>('disposal')
   const [sites, setSites] = useState<DisposalSite[]>([])
   const [wasteTypes, setWasteTypes] = useState<(WasteType & { disposal_sites?: DisposalSite })[]>([])
   const [workers, setWorkers] = useState<Worker[]>([])
   const [activeProjects, setActiveProjects] = useState<ProjectOption[]>([])
+  const [supports, setSupports] = useState<SupportCompany[]>([])
+  const [newSupportName, setNewSupportName] = useState('')
   const [foremanProjectIds, setForemanProjectIds] = useState<Record<number, number[]>>({})
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [scaffoldPrices, setScaffoldPrices] = useState<ScaffoldMaterialPrice[]>([])
@@ -41,7 +43,7 @@ export default function MasterPage() {
   useEffect(() => { loadAll() }, [])
 
   async function loadAll() {
-    const [{ data: s }, { data: w }, { data: wk }, { data: v }, { data: sp }, { data: fp }, { data: c }, { data: pj }, { data: fpj }] = await Promise.all([
+    const [{ data: s }, { data: w }, { data: wk }, { data: v }, { data: sp }, { data: fp }, { data: c }, { data: pj }, { data: fpj }, { data: sup }] = await Promise.all([
       supabase.from('disposal_sites').select('*').order('name'),
       supabase.from('waste_types').select('*, disposal_sites(name)').order('name'),
       supabase.from('workers').select('*').order('name'),
@@ -51,6 +53,7 @@ export default function MasterPage() {
       supabase.from('company_settings').select('*').eq('id', 1).single(),
       supabase.from('projects').select('id, name, status').eq('status', 'active').order('name'),
       supabase.from('foreman_projects').select('worker_id, project_id'),
+      supabase.from('support_companies').select('*').order('sort_order'),
     ])
     setSites(s ?? [])
     setWasteTypes((w as any) ?? [])
@@ -60,6 +63,7 @@ export default function MasterPage() {
     setFuelPrices(fp ?? [])
     setCompany(c)
     setActiveProjects(pj ?? [])
+    setSupports(sup ?? [])
     const grouped: Record<number, number[]> = {}
     ;(fpj ?? []).forEach((l: any) => {
       grouped[l.worker_id] = [...(grouped[l.worker_id] ?? []), l.project_id]
@@ -259,6 +263,29 @@ export default function MasterPage() {
     setTestSending(null)
   }
 
+  async function addSupport() {
+    if (!newSupportName) return
+    const nextOrder = Math.max(0, ...supports.map(x => x.sort_order)) + 1
+    await supabase.from('support_companies').insert({ name: newSupportName, sort_order: nextOrder })
+    setNewSupportName('')
+    loadAll()
+  }
+
+  async function toggleSupportActive(s: SupportCompany) {
+    await supabase.from('support_companies').update({ active: !s.active }).eq('id', s.id)
+    loadAll()
+  }
+
+  async function deleteSupport(id: number) {
+    if (!confirm('この応援先を削除しますか？')) return
+    const { error } = await supabase.from('support_companies').delete().eq('id', id)
+    if (error) {
+      alert('この応援先は過去の段取りで使われているため削除できません。「使わない」に切り替えてください。')
+      return
+    }
+    loadAll()
+  }
+
   async function addVehicle() {
     if (!newVehicle.name) return
     await supabase.from('vehicles').insert({
@@ -308,6 +335,7 @@ export default function MasterPage() {
       <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1">
         <button className={tabClass('disposal')} onClick={() => setTab('disposal')}>処分場・廃材</button>
         <button className={tabClass('worker')} onClick={() => setTab('worker')}>作業員</button>
+        <button className={tabClass('support')} onClick={() => setTab('support')}>応援先</button>
         <button className={tabClass('vehicle')} onClick={() => setTab('vehicle')}>車両・重機</button>
         <button className={tabClass('scaffold')} onClick={() => setTab('scaffold')}>足場材料単価</button>
         <button className={tabClass('fuel')} onClick={() => setTab('fuel')}>燃料単価</button>
@@ -526,6 +554,35 @@ export default function MasterPage() {
                     )}
                   </div>
                 )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {tab === 'support' && (
+        <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+          <h2 className="font-bold mb-3 text-gray-700">応援先</h2>
+          <p className="text-xs text-gray-500 mb-3">
+            他社へ人を貸す応援先です。ここに登録した会社が<Link href="/dispatch" className="text-blue-600 underline">段取り</Link>画面の行き先に並びます。
+            過去の段取りで使った応援先は削除できないので、使わなくなったら「使わない」に切り替えてください。
+          </p>
+          <div className="flex gap-2 mb-3">
+            <input className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm" value={newSupportName}
+              onChange={e => setNewSupportName(e.target.value)} placeholder="応援先の会社名" />
+            <button onClick={addSupport} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm">追加</button>
+          </div>
+          <div className="flex flex-col gap-1">
+            {supports.length === 0 && <p className="text-sm text-gray-400">登録なし</p>}
+            {supports.map(s => (
+              <div key={s.id} className="flex justify-between items-center text-sm py-2 border-b last:border-0">
+                <span className={s.active ? '' : 'text-gray-400 line-through'}>{s.name}</span>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => toggleSupportActive(s)} className="text-xs text-blue-600">
+                    {s.active ? '使わない' : '使う'}
+                  </button>
+                  <button onClick={() => deleteSupport(s.id)} className="text-gray-300 hover:text-red-400 text-xs">削除</button>
+                </div>
               </div>
             ))}
           </div>
