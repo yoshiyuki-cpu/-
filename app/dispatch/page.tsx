@@ -47,6 +47,9 @@ export default function DispatchPage() {
   const [adding, setAdding] = useState<Dest | null>(null)
   const [notifying, setNotifying] = useState(false)
   const [message, setMessage] = useState('')
+  // 段取りを組んでいる最中に新しい応援先が出てくるので、その場で足せるようにする
+  const [newSupportName, setNewSupportName] = useState('')
+  const [addingSupport, setAddingSupport] = useState(false)
 
   useEffect(() => { load() }, [date])
 
@@ -178,6 +181,18 @@ export default function DispatchPage() {
     load()
   }
 
+  async function addSupport() {
+    const name = newSupportName.trim()
+    if (!name) return
+    const nextOrder = Math.max(0, ...supports.map(s => s.sort_order)) + 1
+    const { data, error } = await supabase.from('support_companies')
+      .insert({ name, sort_order: nextOrder }).select('*').single()
+    if (error) { setMessage('応援先の追加に失敗しました。'); return }
+    setSupports(ss => [...ss, data!])
+    setNewSupportName('')
+    setAddingSupport(false)
+  }
+
   async function notify() {
     setNotifying(true)
     setMessage('')
@@ -260,7 +275,8 @@ export default function DispatchPage() {
               </div>
 
               <div className="grid grid-cols-2 gap-2 mb-2">
-                <input type="time" value={g?.meet_time ?? ''} className={inputCls}
+                {/* 時刻ピッカーだと入力が手間なので、「7:30」「7時半」など自由に打てるテキスト入力にする */}
+                <input type="text" value={g?.meet_time ?? ''} placeholder="集合時間" className={inputCls}
                   onChange={e => updateGroupField(d, { meet_time: e.target.value || null })} />
                 <input type="text" value={g?.meet_place ?? ''} placeholder="集合場所" className={inputCls}
                   onChange={e => updateGroupField(d, { meet_place: e.target.value || null })} />
@@ -283,6 +299,28 @@ export default function DispatchPage() {
             </section>
           )
         })}
+      </div>
+
+      {/* 段取りの途中で新しい応援先が出てきても、マスタ画面に移動せず足せるようにする */}
+      <div className="mt-3">
+        {addingSupport ? (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+            <p className="text-sm font-medium mb-2">応援先を追加</p>
+            <div className="flex gap-2">
+              <input autoFocus value={newSupportName} onChange={e => setNewSupportName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') addSupport() }}
+                placeholder="会社名" className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              <button onClick={addSupport} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm">追加</button>
+              <button onClick={() => { setAddingSupport(false); setNewSupportName('') }}
+                className="border border-gray-300 text-gray-600 px-3 py-2 rounded-lg text-sm">やめる</button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setAddingSupport(true)}
+            className="w-full border border-dashed border-gray-300 text-gray-500 rounded-xl py-2.5 text-sm">
+            ＋ 応援先を追加
+          </button>
+        )}
       </div>
 
       <div className="mt-5">
