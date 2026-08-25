@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation'
 
 const NAV_ITEMS = [
   { href: '/', label: '現場一覧', icon: '🏗️' },
+  { href: '/dispatch', label: '段取り', icon: '🚚' },
   { href: '/estimates', label: '見積り', icon: '📄' },
   { href: '/scaffold', label: '足場計算', icon: '📐' },
   { href: '/attendance', label: '出面', icon: '🗓️' },

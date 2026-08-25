@@ -253,3 +253,41 @@ export type CompanySettings = {
   representative: string | null
   stamp_url: string | null
 }
+
+// 応援先（他社への人貸し先）
+export type SupportCompany = {
+  id: number
+  name: string
+  sort_order: number
+  active: boolean
+  created_at: string
+}
+
+// 翌日の段取り（1日1件）
+export type DispatchPlan = {
+  id: number
+  date: string
+  notified_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+// 段取りの行き先。自社現場なら project_id、応援なら support_company_id が入る
+export type DispatchGroup = {
+  id: number
+  plan_id: number
+  project_id: number | null
+  support_company_id: number | null
+  meet_time: string | null
+  meet_place: string | null
+  note: string | null
+  created_at: string
+}
+
+export type DispatchAssignment = {
+  id: number
+  plan_id: number
+  group_id: number
+  worker_id: number
+  created_at: string
+}
