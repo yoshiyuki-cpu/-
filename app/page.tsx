@@ -29,6 +29,7 @@ export default function HomePage() {
     const { data: projectData } = await supabase
       .from('projects')
       .select('*')
+      .is('deleted_at', null)
       .order('created_at', { ascending: false })
 
     if (!projectData) { setLoading(false); return }
