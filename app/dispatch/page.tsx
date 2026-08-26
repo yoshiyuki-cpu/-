@@ -47,9 +47,14 @@ export default function DispatchPage() {
   const [adding, setAdding] = useState<Dest | null>(null)
   const [notifying, setNotifying] = useState(false)
   const [message, setMessage] = useState('')
-  // 段取りを組んでいる最中に新しい応援先が出てくるので、その場で足せるようにする
+  // 段取りを組んでいる最中に新しい応援先・現場が出てくるので、その場で足せるようにする
   const [newSupportName, setNewSupportName] = useState('')
   const [addingSupport, setAddingSupport] = useState(false)
+  const [newProjectName, setNewProjectName] = useState('')
+  const [addingProject, setAddingProject] = useState(false)
+  // 作業員の入退社もこの画面から扱えるようにする
+  const [managingWorkers, setManagingWorkers] = useState(false)
+  const [newWorkerName, setNewWorkerName] = useState('')
 
   useEffect(() => { load() }, [date])
 
@@ -193,6 +198,46 @@ export default function DispatchPage() {
     setAddingSupport(false)
   }
 
+  async function addProject() {
+    const name = newProjectName.trim()
+    if (!name) return
+    // 着工日は段取りの日を初期値にする。場所や予算は後から現場一覧で足せる
+    const { data, error } = await supabase.from('projects')
+      .insert({ name, start_date: date, status: 'active' }).select('*').single()
+    if (error) { setMessage('現場の追加に失敗しました。'); return }
+    setProjects(ps => [...ps, data!])
+    setNewProjectName('')
+    setAddingProject(false)
+  }
+
+  // 終わった現場は「完了」にする。削除すると廃材・人工などの記録まで消えるため、
+  // 段取りの一覧から外すだけにして台帳は残す
+  async function completeProject(p: Project) {
+    if (!confirm(`「${p.name}」を完了にしますか？\n段取りの行き先から外れます。記録（廃材・人工・写真など）は残ります。`)) return
+    await supabase.from('projects').update({ status: 'completed' }).eq('id', p.id)
+    setProjects(ps => ps.filter(x => x.id !== p.id))
+  }
+
+  async function addWorker() {
+    const name = newWorkerName.trim()
+    if (!name) return
+    const { data, error } = await supabase.from('workers').insert({ name }).select('id, name').single()
+    if (error) { setMessage('作業員の追加に失敗しました。'); return }
+    setWorkers(ws => [...ws, data!].sort((a, b) => a.name.localeCompare(b.name, 'ja')))
+    setNewWorkerName('')
+  }
+
+  async function deleteWorker(w: Worker) {
+    if (!confirm(`「${w.name}」を作業員から削除しますか？`)) return
+    const { error } = await supabase.from('workers').delete().eq('id', w.id)
+    if (error) {
+      alert('この作業員は人工記録などで使われているため削除できません。過去の記録を残す必要があるので、そのままにしてください。')
+      return
+    }
+    setWorkers(ws => ws.filter(x => x.id !== w.id))
+    setAssignments(as => as.filter(a => a.worker_id !== w.id))
+  }
+
   async function notify() {
     setNotifying(true)
     setMessage('')
@@ -240,19 +285,26 @@ export default function DispatchPage() {
         )}
       </div>
 
-      {/* 未配置プール。ここが空になれば全員に行き先が決まったことになる */}
+      {/* 未配置プール。人数が多いと画面を埋め尽くすので、高さを抑えてスクロールで選ぶ */}
       <section className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-4">
-        <h2 className="font-bold text-sm text-amber-800 mb-2">未配置（{unassigned.length}人）</h2>
+        <div className="flex items-center mb-2">
+          <h2 className="font-bold text-sm text-amber-800">未配置（{unassigned.length}人）</h2>
+          <button onClick={() => setManagingWorkers(true)} className="ml-auto text-xs text-blue-600">
+            作業員を管理
+          </button>
+        </div>
         {unassigned.length === 0
           ? <p className="text-xs text-amber-700">全員の行き先が決まりました。</p>
           : (
-            <div className="flex flex-wrap gap-1.5">
-              {unassigned.map(w => (
-                <button key={w.id} onClick={() => setMoving(w)}
-                  className="px-2.5 py-1.5 rounded-full bg-white border border-amber-300 text-sm text-gray-700">
-                  {w.name}
-                </button>
-              ))}
+            <div className="max-h-32 overflow-y-auto -mx-1 px-1">
+              <div className="flex flex-wrap gap-1.5">
+                {unassigned.map(w => (
+                  <button key={w.id} onClick={() => setMoving(w)}
+                    className="px-2.5 py-1.5 rounded-full bg-white border border-amber-300 text-sm text-gray-700">
+                    {w.name}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
       </section>
@@ -272,6 +324,10 @@ export default function DispatchPage() {
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">着工</span>
                 )}
                 <span className="text-xs text-gray-400 ml-auto">{ws.length}人</span>
+                {d.kind === 'project' && (
+                  <button onClick={() => completeProject(projects.find(p => p.id === d.id)!)}
+                    className="text-xs text-gray-400 hover:text-emerald-600">完了</button>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-2 mb-2">
@@ -301,8 +357,30 @@ export default function DispatchPage() {
         })}
       </div>
 
-      {/* 段取りの途中で新しい応援先が出てきても、マスタ画面に移動せず足せるようにする */}
+      {/* 段取りの途中で新しい現場・応援先が出てきても、マスタ画面に移動せず足せるようにする */}
       <div className="mt-3">
+        {addingProject ? (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+            <p className="text-sm font-medium mb-2">現場を追加</p>
+            <div className="flex gap-2">
+              <input autoFocus value={newProjectName} onChange={e => setNewProjectName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') addProject() }}
+                placeholder="現場名" className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              <button onClick={addProject} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm">追加</button>
+              <button onClick={() => { setAddingProject(false); setNewProjectName('') }}
+                className="border border-gray-300 text-gray-600 px-3 py-2 rounded-lg text-sm">やめる</button>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">着工日は{formatDate(date)}で登録します。場所や予算は後から現場一覧で足せます。</p>
+          </div>
+        ) : (
+          <button onClick={() => setAddingProject(true)}
+            className="w-full border border-dashed border-gray-300 text-gray-500 rounded-xl py-2.5 text-sm">
+            ＋ 現場を追加
+          </button>
+        )}
+      </div>
+
+      <div className="mt-2">
         {addingSupport ? (
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
             <p className="text-sm font-medium mb-2">応援先を追加</p>
@@ -352,6 +430,32 @@ export default function DispatchPage() {
                 未配置に戻す
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 作業員の入退社をこの画面から扱えるようにする */}
+      {managingWorkers && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/40" onClick={() => setManagingWorkers(false)}>
+          <div className="bg-white w-full rounded-t-2xl p-4 max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <h3 className="font-bold mb-2">作業員の管理</h3>
+            <div className="flex gap-2 mb-3">
+              <input value={newWorkerName} onChange={e => setNewWorkerName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') addWorker() }}
+                placeholder="作業員名" className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              <button onClick={addWorker} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm">追加</button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {workers.length === 0 && <p className="text-sm text-gray-400">作業員が登録されていません。</p>}
+              {workers.map(w => (
+                <div key={w.id} className="flex justify-between items-center text-sm py-2.5 border-b last:border-0">
+                  <span>{w.name}</span>
+                  <button onClick={() => deleteWorker(w)} className="text-xs text-gray-300 hover:text-red-400">削除</button>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => setManagingWorkers(false)}
+              className="mt-3 w-full border border-gray-300 text-gray-600 py-2.5 rounded-lg text-sm">閉じる</button>
           </div>
         </div>
       )}
