@@ -579,9 +579,13 @@ export default function DispatchPage() {
           className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold disabled:opacity-40">
           {notifying ? '送信中...' : '職長に通知する'}
         </button>
-        {assignments.length === 0 && (
-          <p className="text-xs text-gray-400 mt-2 text-center">配員を1人以上決めると送信できます。</p>
-        )}
+        {assignments.length === 0
+          ? <p className="text-xs text-gray-400 mt-2 text-center">配員を1人以上決めると送信できます。</p>
+          : !notifiedAt && (
+            <p className="text-xs text-gray-400 mt-2 text-center">
+              押さなくても、夕方18:30に自動で送られます。
+            </p>
+          )}
         {message && <p className="text-sm text-gray-700 mt-3">{message}</p>}
       </div>
 
