@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
       .select('id, meet_time, meet_place, note, projects(name), support_companies(name)')
       .eq('plan_id', plan.id),
     supabase.from('dispatch_assignments').select('group_id, worker_id').eq('plan_id', plan.id),
-    supabase.from('workers').select('id, name').order('name'),
+    supabase.from('workers').select('id, name, in_dispatch').order('name'),
   ])
 
   const nameOf = new Map((workers ?? []).map(w => [w.id, w.name]))
@@ -61,7 +61,10 @@ export async function POST(req: NextRequest) {
   }))
   // 配員がいない行き先は段取り表に出さない（現場の一覧をそのまま流すと読みにくくなるため）
   const visibleGroups = groupRows.filter(g => g.workers.length > 0)
-  const unassigned = (workers ?? []).filter(w => !assignedIds.has(w.id)).map(w => w.name)
+  // 事務員など段取りに出さない人は未配置に数えない
+  const unassigned = (workers ?? [])
+    .filter(w => w.in_dispatch && !assignedIds.has(w.id))
+    .map(w => w.name)
 
   const lines = buildDispatchLines(date, visibleGroups, unassigned)
   const text = lines.join('\n')
