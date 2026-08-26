@@ -27,6 +27,7 @@ export type Project = {
   start_date: string
   end_date: string | null
   status: 'active' | 'completed'
+  deleted_at: string | null
   notes: string | null
   aerial_photo_url: string | null
   budget_waste_cost: number | null

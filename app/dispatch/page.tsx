@@ -53,6 +53,11 @@ export default function DispatchPage() {
   const [newProjectName, setNewProjectName] = useState('')
   const [addingProject, setAddingProject] = useState(false)
   // 作業員の入退社もこの画面から扱えるようにする
+  // 名前・着工日の打ち間違いを直すための編集状態
+  const [editing, setEditing] = useState<{ id: number; name: string; start_date: string } | null>(null)
+  const [editingSupport, setEditingSupport] = useState<{ id: number; name: string } | null>(null)
+  const [trashed, setTrashed] = useState<Project[]>([])
+  const [showTrash, setShowTrash] = useState(false)
   const [managingWorkers, setManagingWorkers] = useState(false)
   const [newWorkerName, setNewWorkerName] = useState('')
 
@@ -60,15 +65,17 @@ export default function DispatchPage() {
 
   async function load() {
     setLoading(true)
-    const [{ data: pj }, { data: sc }, { data: wk }, { data: plan }] = await Promise.all([
-      supabase.from('projects').select('*').eq('status', 'active').order('name'),
+    const [{ data: pj }, { data: sc }, { data: wk }, { data: plan }, { data: tr }] = await Promise.all([
+      supabase.from('projects').select('*').eq('status', 'active').is('deleted_at', null).order('name'),
       supabase.from('support_companies').select('*').eq('active', true).order('sort_order'),
       supabase.from('workers').select('id, name, in_dispatch').order('name'),
       supabase.from('dispatch_plans').select('*').eq('date', date).maybeSingle(),
+      supabase.from('projects').select('*').not('deleted_at', 'is', null).order('deleted_at', { ascending: false }),
     ])
     setProjects(pj ?? [])
     setSupports(sc ?? [])
     setWorkers(wk ?? [])
+    setTrashed(tr ?? [])
     setPlanId(plan?.id ?? null)
     setNotifiedAt(plan?.notified_at ?? null)
 
@@ -247,26 +254,74 @@ export default function DispatchPage() {
     return results.reduce((sum, r) => sum + (r.count ?? 0), 0)
   }
 
-  // 入力ミスや二重登録の現場を消す。記録が入っている場合は消える中身を伝えて止める
+  // 入力ミスや二重登録の現場を消す。本当に消すと元に戻せないので、ごみ箱に入れて隠すだけにする。
+  // 中身は何も消さないため、戻せば記録もそのまま復活する
   async function deleteProject(p: Project) {
     const count = await countProjectRecords(p.id)
-    const ok = count === 0
-      ? confirm(`「${p.name}」を削除しますか？\n記録は入っていないので、そのまま消せます。`)
-      : confirm(
-          `「${p.name}」には記録が${count}件あります。\n\n` +
-          `削除すると廃材・人工・写真・議事録・足場計算などがすべて消えて元に戻せません。\n` +
-          `終わった現場なら「完了」を使ってください。\n\n` +
-          `それでも削除しますか？`)
+    const ok = confirm(
+      count === 0
+        ? `「${p.name}」をごみ箱に入れますか？\n記録は入っていません。あとで元に戻せます。`
+        : `「${p.name}」をごみ箱に入れますか？\n記録${count}件も一緒に隠れますが、消えるわけではありません。あとで元に戻せます。`)
     if (!ok) return
 
-    const { error } = await supabase.from('projects').delete().eq('id', p.id)
-    if (error) { setMessage('現場の削除に失敗しました。'); return }
-    setProjects(ps => ps.filter(x => x.id !== p.id))
-    // 削除でdispatch_groupsもcascadeで消えるため、画面側の状態も揃えておく
+    const { error } = await supabase.from('projects')
+      .update({ deleted_at: new Date().toISOString() }).eq('id', p.id)
+    if (error) { setMessage('ごみ箱に入れられませんでした。'); return }
+
+    // 今日の配員に入っていたら、そこからも抜く（現場自体は残るので手動で外す）
     const gone = groups.filter(g => g.project_id === p.id).map(g => g.id)
+    if (gone.length > 0 && planId) {
+      await supabase.from('dispatch_groups').delete().in('id', gone)
+    }
+    setProjects(ps => ps.filter(x => x.id !== p.id))
     setGroups(gs => gs.filter(g => g.project_id !== p.id))
     setAssignments(as => as.filter(a => !gone.includes(a.group_id)))
-    setMessage(`「${p.name}」を削除しました。`)
+    setTrashed(ts => [{ ...p, deleted_at: new Date().toISOString() }, ...ts])
+    setMessage(`「${p.name}」をごみ箱に入れました。`)
+  }
+
+  // 打ち間違いや着工日のミスを直せるようにする
+  async function saveProjectEdit() {
+    if (!editing) return
+    const name = editing.name.trim()
+    if (!name) return
+    const { error } = await supabase.from('projects')
+      .update({ name, start_date: editing.start_date }).eq('id', editing.id)
+    if (error) { setMessage('現場の修正に失敗しました。'); return }
+    setProjects(ps => ps.map(p => p.id === editing.id ? { ...p, name, start_date: editing.start_date } : p))
+    setEditing(null)
+    setMessage('現場を修正しました。')
+  }
+
+  async function saveSupportEdit() {
+    if (!editingSupport) return
+    const name = editingSupport.name.trim()
+    if (!name) return
+    const { error } = await supabase.from('support_companies').update({ name }).eq('id', editingSupport.id)
+    if (error) { setMessage('応援先の修正に失敗しました。'); return }
+    setSupports(ss => ss.map(s => s.id === editingSupport.id ? { ...s, name } : s))
+    setEditingSupport(null)
+    setMessage('応援先を修正しました。')
+  }
+
+  async function restoreProject(p: Project) {
+    await supabase.from('projects').update({ deleted_at: null }).eq('id', p.id)
+    setTrashed(ts => ts.filter(x => x.id !== p.id))
+    if (p.status === 'active') setProjects(ps => [...ps, p].sort((a, b) => a.name.localeCompare(b.name, 'ja')))
+    setMessage(`「${p.name}」を元に戻しました。`)
+  }
+
+  // ごみ箱から本当に消す。ここで消すと子テーブルもcascadeで消えて戻せない
+  async function purgeProject(p: Project) {
+    const count = await countProjectRecords(p.id)
+    if (!confirm(
+      `「${p.name}」を完全に削除しますか？\n` +
+      (count > 0 ? `記録${count}件（廃材・人工・写真・議事録・足場計算など）も一緒に消えます。\n` : '') +
+      `これは元に戻せません。`)) return
+    const { error } = await supabase.from('projects').delete().eq('id', p.id)
+    if (error) { setMessage('完全削除に失敗しました。'); return }
+    setTrashed(ts => ts.filter(x => x.id !== p.id))
+    setMessage(`「${p.name}」を完全に削除しました。`)
   }
 
   // 終わった現場は「完了」にする。削除すると廃材・人工などの記録まで消えるため、
@@ -288,6 +343,15 @@ export default function DispatchPage() {
 
   // 段取りから外す／戻す。workersを消すと人工記録などの過去の台帳が壊れるため、
   // 印を落として段取りに出さなくするだけにする（他の画面には残る）
+  async function renameWorker(w: Worker) {
+    const name = prompt('作業員名', w.name)?.trim()
+    if (!name || name === w.name) return
+    const { error } = await supabase.from('workers').update({ name }).eq('id', w.id)
+    if (error) { setMessage('作業員名の修正に失敗しました。'); return }
+    setWorkers(ws => ws.map(x => x.id === w.id ? { ...x, name } : x)
+      .sort((a, b) => a.name.localeCompare(b.name, 'ja')))
+  }
+
   async function setInDispatch(w: Worker, next: boolean) {
     if (next === false && !confirm(`「${w.name}」を段取りから外しますか？\n出面などの他の画面には残ります。`)) return
     await supabase.from('workers').update({ in_dispatch: next }).eq('id', w.id)
@@ -387,11 +451,17 @@ export default function DispatchPage() {
                 <span className="text-xs text-gray-400 ml-auto">{ws.length}人</span>
                 {d.kind === 'project' && (
                   <>
+                    <button onClick={() => { const p = projects.find(x => x.id === d.id)!; setEditing({ id: p.id, name: p.name, start_date: p.start_date }) }}
+                      className="text-xs text-blue-600">修正</button>
                     <button onClick={() => completeProject(projects.find(p => p.id === d.id)!)}
                       className="text-xs text-gray-400 hover:text-emerald-600">完了</button>
                     <button onClick={() => deleteProject(projects.find(p => p.id === d.id)!)}
                       className="text-xs text-gray-300 hover:text-red-500">削除</button>
                   </>
+                )}
+                {d.kind === 'support' && (
+                  <button onClick={() => { const sc = supports.find(x => x.id === d.id)!; setEditingSupport({ id: sc.id, name: sc.name }) }}
+                    className="text-xs text-blue-600">修正</button>
                 )}
                 {d.kind === 'support' && (
                   <button onClick={() => deleteSupport(supports.find(s => s.id === d.id)!)}
@@ -425,6 +495,40 @@ export default function DispatchPage() {
           )
         })}
       </div>
+
+      {/* ごみ箱。間違って消した現場を元に戻せるようにする（Supabaseの無料プランは自動バックアップが無い） */}
+      {trashed.length > 0 && (
+        <div className="mt-3">
+          <button onClick={() => setShowTrash(v => !v)}
+            className="w-full flex items-center justify-between bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-3 text-sm">
+            <span className="text-gray-600">🗑 ごみ箱（{trashed.length}件）</span>
+            <span className="text-gray-400 text-xs">{showTrash ? '閉じる' : '開く'}</span>
+          </button>
+          {showTrash && (
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mt-2">
+              <p className="text-xs text-gray-500 mb-3">
+                記録は消えていません。「元に戻す」で現場ごと復活します。
+              </p>
+              {trashed.map(p => (
+                <div key={p.id} className="flex items-center justify-between text-sm py-2.5 border-b last:border-0">
+                  <div>
+                    <p>{p.name}</p>
+                    {p.deleted_at && (
+                      <p className="text-xs text-gray-400">
+                        {new Date(p.deleted_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} に削除
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <button onClick={() => restoreProject(p)} className="text-xs text-blue-600">元に戻す</button>
+                    <button onClick={() => purgeProject(p)} className="text-xs text-gray-300 hover:text-red-500">完全削除</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 段取りの途中で新しい現場・応援先が出てきても、マスタ画面に移動せず足せるようにする */}
       <div className="mt-3">
@@ -503,6 +607,40 @@ export default function DispatchPage() {
         </div>
       )}
 
+      {/* 現場の名前・着工日の修正 */}
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/40" onClick={() => setEditing(null)}>
+          <div className="bg-white w-full rounded-t-2xl p-4" onClick={e => e.stopPropagation()}>
+            <h3 className="font-bold mb-3">現場の修正</h3>
+            <label className="block text-xs text-gray-500 mb-1">現場名</label>
+            <input autoFocus value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-3" />
+            <label className="block text-xs text-gray-500 mb-1">着工日</label>
+            <input type="date" value={editing.start_date} onChange={e => setEditing({ ...editing, start_date: e.target.value })}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-4" />
+            <div className="flex gap-2">
+              <button onClick={saveProjectEdit} className="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium">保存</button>
+              <button onClick={() => setEditing(null)} className="flex-1 border border-gray-300 text-gray-600 py-2.5 rounded-lg text-sm">やめる</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 応援先の名前の修正 */}
+      {editingSupport && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/40" onClick={() => setEditingSupport(null)}>
+          <div className="bg-white w-full rounded-t-2xl p-4" onClick={e => e.stopPropagation()}>
+            <h3 className="font-bold mb-3">応援先の修正</h3>
+            <input autoFocus value={editingSupport.name} onChange={e => setEditingSupport({ ...editingSupport, name: e.target.value })}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-4" />
+            <div className="flex gap-2">
+              <button onClick={saveSupportEdit} className="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium">保存</button>
+              <button onClick={() => setEditingSupport(null)} className="flex-1 border border-gray-300 text-gray-600 py-2.5 rounded-lg text-sm">やめる</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 作業員の入退社をこの画面から扱えるようにする */}
       {managingWorkers && (
         <div className="fixed inset-0 z-50 flex items-end bg-black/40" onClick={() => setManagingWorkers(false)}>
@@ -522,7 +660,10 @@ export default function DispatchPage() {
               {dispatchWorkers.map(w => (
                 <div key={w.id} className="flex justify-between items-center text-sm py-2.5 border-b">
                   <span>{w.name}</span>
-                  <button onClick={() => setInDispatch(w, false)} className="text-xs text-gray-400 hover:text-red-500">外す</button>
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => renameWorker(w)} className="text-xs text-blue-600">修正</button>
+                    <button onClick={() => setInDispatch(w, false)} className="text-xs text-gray-400 hover:text-red-500">外す</button>
+                  </div>
                 </div>
               ))}
 
