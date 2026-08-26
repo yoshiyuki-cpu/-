@@ -214,6 +214,61 @@ export default function DispatchPage() {
     setAddingProject(false)
   }
 
+  // 応援先も打ち間違いがあるので消せるようにする。
+  // 過去の段取りで使っていた場合は履歴が消えてしまうため、その場合は「使わない」に切り替える
+  async function deleteSupport(sc: SupportCompany) {
+    const { count } = await supabase.from('dispatch_groups')
+      .select('id', { count: 'exact', head: true }).eq('support_company_id', sc.id)
+    if ((count ?? 0) > 0) {
+      if (!confirm(
+        `「${sc.name}」は過去${count}日ぶんの段取りで使われています。\n` +
+        `削除するとその履歴からも消えます。\n\n削除しますか？`)) return
+    } else if (!confirm(`「${sc.name}」を削除しますか？`)) return
+
+    const { error } = await supabase.from('support_companies').delete().eq('id', sc.id)
+    if (error) { setMessage('応援先の削除に失敗しました。'); return }
+    setSupports(ss => ss.filter(x => x.id !== sc.id))
+    const gone = groups.filter(g => g.support_company_id === sc.id).map(g => g.id)
+    setGroups(gs => gs.filter(g => g.support_company_id !== sc.id))
+    setAssignments(as => as.filter(a => !gone.includes(a.group_id)))
+    setMessage(`「${sc.name}」を削除しました。`)
+  }
+
+  // projectsを消すと子テーブルがcascadeで一緒に消えてしまう（DBは止めてくれない）ので、
+  // 記録が残っていないかを自分で数えてから消すかどうかを判断する
+  const RECORD_TABLES = [
+    'waste_entries', 'other_entries', 'labor_entries', 'scrap_records',
+    'meeting_notes', 'ky_photos', 'tool_usages', 'scaffold_plans',
+  ]
+
+  async function countProjectRecords(projectId: number) {
+    const results = await Promise.all(RECORD_TABLES.map(t =>
+      supabase.from(t).select('id', { count: 'exact', head: true }).eq('project_id', projectId)))
+    return results.reduce((sum, r) => sum + (r.count ?? 0), 0)
+  }
+
+  // 入力ミスや二重登録の現場を消す。記録が入っている場合は消える中身を伝えて止める
+  async function deleteProject(p: Project) {
+    const count = await countProjectRecords(p.id)
+    const ok = count === 0
+      ? confirm(`「${p.name}」を削除しますか？\n記録は入っていないので、そのまま消せます。`)
+      : confirm(
+          `「${p.name}」には記録が${count}件あります。\n\n` +
+          `削除すると廃材・人工・写真・議事録・足場計算などがすべて消えて元に戻せません。\n` +
+          `終わった現場なら「完了」を使ってください。\n\n` +
+          `それでも削除しますか？`)
+    if (!ok) return
+
+    const { error } = await supabase.from('projects').delete().eq('id', p.id)
+    if (error) { setMessage('現場の削除に失敗しました。'); return }
+    setProjects(ps => ps.filter(x => x.id !== p.id))
+    // 削除でdispatch_groupsもcascadeで消えるため、画面側の状態も揃えておく
+    const gone = groups.filter(g => g.project_id === p.id).map(g => g.id)
+    setGroups(gs => gs.filter(g => g.project_id !== p.id))
+    setAssignments(as => as.filter(a => !gone.includes(a.group_id)))
+    setMessage(`「${p.name}」を削除しました。`)
+  }
+
   // 終わった現場は「完了」にする。削除すると廃材・人工などの記録まで消えるため、
   // 段取りの一覧から外すだけにして台帳は残す
   async function completeProject(p: Project) {
@@ -331,8 +386,16 @@ export default function DispatchPage() {
                 )}
                 <span className="text-xs text-gray-400 ml-auto">{ws.length}人</span>
                 {d.kind === 'project' && (
-                  <button onClick={() => completeProject(projects.find(p => p.id === d.id)!)}
-                    className="text-xs text-gray-400 hover:text-emerald-600">完了</button>
+                  <>
+                    <button onClick={() => completeProject(projects.find(p => p.id === d.id)!)}
+                      className="text-xs text-gray-400 hover:text-emerald-600">完了</button>
+                    <button onClick={() => deleteProject(projects.find(p => p.id === d.id)!)}
+                      className="text-xs text-gray-300 hover:text-red-500">削除</button>
+                  </>
+                )}
+                {d.kind === 'support' && (
+                  <button onClick={() => deleteSupport(supports.find(s => s.id === d.id)!)}
+                    className="text-xs text-gray-300 hover:text-red-500">削除</button>
                 )}
               </div>
 
