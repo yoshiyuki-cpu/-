@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase, Project, SupportCompany, DispatchGroup } from '@/lib/supabase'
 
-type Worker = { id: number; name: string }
+type Worker = { id: number; name: string; in_dispatch: boolean }
 type Assignment = { id: number; group_id: number; worker_id: number }
 // 行き先は「自社現場」か「応援先」のどちらか。まだ誰も配置していない行き先も並べたいので、
 // DBのdispatch_groupsが無い状態でも画面上の候補として扱えるようにしている
@@ -63,7 +63,7 @@ export default function DispatchPage() {
     const [{ data: pj }, { data: sc }, { data: wk }, { data: plan }] = await Promise.all([
       supabase.from('projects').select('*').eq('status', 'active').order('name'),
       supabase.from('support_companies').select('*').eq('active', true).order('sort_order'),
-      supabase.from('workers').select('id, name').order('name'),
+      supabase.from('workers').select('id, name, in_dispatch').order('name'),
       supabase.from('dispatch_plans').select('*').eq('date', date).maybeSingle(),
     ])
     setProjects(pj ?? [])
@@ -102,7 +102,11 @@ export default function DispatchPage() {
   }
 
   const assignedIds = new Set(assignments.map(a => a.worker_id))
-  const unassigned = workers.filter(w => !assignedIds.has(w.id))
+  // 事務員や辞めた人を除いた「段取りに出す人」だけを未配置プール・追加候補に出す。
+  // workers自体は名前の引き当てに使うので全員保持している
+  const dispatchWorkers = workers.filter(w => w.in_dispatch)
+  const unassigned = dispatchWorkers.filter(w => !assignedIds.has(w.id))
+  const hiddenWorkers = workers.filter(w => !w.in_dispatch)
 
   // 段取りは日ごとに1件。まだ無ければ作ってからでないと配員を保存できない
   async function ensurePlan() {
@@ -221,21 +225,23 @@ export default function DispatchPage() {
   async function addWorker() {
     const name = newWorkerName.trim()
     if (!name) return
-    const { data, error } = await supabase.from('workers').insert({ name }).select('id, name').single()
+    const { data, error } = await supabase.from('workers').insert({ name, in_dispatch: true }).select('id, name, in_dispatch').single()
     if (error) { setMessage('作業員の追加に失敗しました。'); return }
     setWorkers(ws => [...ws, data!].sort((a, b) => a.name.localeCompare(b.name, 'ja')))
     setNewWorkerName('')
   }
 
-  async function deleteWorker(w: Worker) {
-    if (!confirm(`「${w.name}」を作業員から削除しますか？`)) return
-    const { error } = await supabase.from('workers').delete().eq('id', w.id)
-    if (error) {
-      alert('この作業員は人工記録などで使われているため削除できません。過去の記録を残す必要があるので、そのままにしてください。')
-      return
+  // 段取りから外す／戻す。workersを消すと人工記録などの過去の台帳が壊れるため、
+  // 印を落として段取りに出さなくするだけにする（他の画面には残る）
+  async function setInDispatch(w: Worker, next: boolean) {
+    if (next === false && !confirm(`「${w.name}」を段取りから外しますか？\n出面などの他の画面には残ります。`)) return
+    await supabase.from('workers').update({ in_dispatch: next }).eq('id', w.id)
+    setWorkers(ws => ws.map(x => x.id === w.id ? { ...x, in_dispatch: next } : x))
+    // 外した人が今日の配員に入っていたら、そこからも抜く
+    if (!next && planId) {
+      await supabase.from('dispatch_assignments').delete().eq('plan_id', planId).eq('worker_id', w.id)
+      setAssignments(as => as.filter(a => a.worker_id !== w.id))
     }
-    setWorkers(ws => ws.filter(x => x.id !== w.id))
-    setAssignments(as => as.filter(a => a.worker_id !== w.id))
   }
 
   async function notify() {
@@ -438,7 +444,10 @@ export default function DispatchPage() {
       {managingWorkers && (
         <div className="fixed inset-0 z-50 flex items-end bg-black/40" onClick={() => setManagingWorkers(false)}>
           <div className="bg-white w-full rounded-t-2xl p-4 max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            <h3 className="font-bold mb-2">作業員の管理</h3>
+            <h3 className="font-bold mb-1">段取りに出す作業員</h3>
+            <p className="text-xs text-gray-500 mb-3">
+              事務員や辞めた人は「外す」で段取りから消えます。出面などの他の画面と過去の記録はそのまま残ります。
+            </p>
             <div className="flex gap-2 mb-3">
               <input value={newWorkerName} onChange={e => setNewWorkerName(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') addWorker() }}
@@ -447,12 +456,24 @@ export default function DispatchPage() {
             </div>
             <div className="flex-1 overflow-y-auto">
               {workers.length === 0 && <p className="text-sm text-gray-400">作業員が登録されていません。</p>}
-              {workers.map(w => (
-                <div key={w.id} className="flex justify-between items-center text-sm py-2.5 border-b last:border-0">
+              {dispatchWorkers.map(w => (
+                <div key={w.id} className="flex justify-between items-center text-sm py-2.5 border-b">
                   <span>{w.name}</span>
-                  <button onClick={() => deleteWorker(w)} className="text-xs text-gray-300 hover:text-red-400">削除</button>
+                  <button onClick={() => setInDispatch(w, false)} className="text-xs text-gray-400 hover:text-red-500">外す</button>
                 </div>
               ))}
+
+              {hiddenWorkers.length > 0 && (
+                <div className="mt-4">
+                  <p className="text-xs font-semibold text-gray-400 mb-1">段取りに出さない（{hiddenWorkers.length}人）</p>
+                  {hiddenWorkers.map(w => (
+                    <div key={w.id} className="flex justify-between items-center text-sm py-2.5 border-b">
+                      <span className="text-gray-400">{w.name}</span>
+                      <button onClick={() => setInDispatch(w, true)} className="text-xs text-blue-600">戻す</button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <button onClick={() => setManagingWorkers(false)}
               className="mt-3 w-full border border-gray-300 text-gray-600 py-2.5 rounded-lg text-sm">閉じる</button>
