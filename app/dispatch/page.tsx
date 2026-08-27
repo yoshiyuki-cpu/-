@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase, Project, SupportCompany, DispatchGroup } from '@/lib/supabase'
 
-type Worker = { id: number; name: string; in_dispatch: boolean }
+type Worker = { id: number; name: string; in_dispatch: boolean; usage?: number }
 type Assignment = { id: number; group_id: number; worker_id: number }
 // 行き先は「自社現場」か「応援先」のどちらか。まだ誰も配置していない行き先も並べたいので、
 // DBのdispatch_groupsが無い状態でも画面上の候補として扱えるようにしている
@@ -123,6 +123,15 @@ export default function DispatchPage() {
   const dispatchWorkers = workers.filter(w => w.in_dispatch)
   const unassigned = dispatchWorkers.filter(w => !assignedIds.has(w.id))
   const hiddenWorkers = workers.filter(w => !w.in_dispatch)
+  // 同じ名前の人がいると、どちらを外したのか分からず「外しても反映されない」ように見える。
+  // 印を付けて見分けられるようにする
+  const dupNames = new Set(
+    Object.entries(workers.reduce((acc, w) => {
+      const k = w.name.trim()
+      acc[k] = (acc[k] ?? 0) + 1
+      return acc
+    }, {} as Record<string, number>)).filter(([, n]) => n > 1).map(([k]) => k)
+  )
 
   // 段取りは日ごとに1件。まだ無ければ作ってからでないと配員を保存できない
   async function ensurePlan() {
@@ -388,6 +397,18 @@ export default function DispatchPage() {
 
   // 段取りから外す／戻す。workersを消すと人工記録などの過去の台帳が壊れるため、
   // 印を落として段取りに出さなくするだけにする（他の画面には残る）
+  // 同名の人がいるとき、どちらが本物か（実績が多いか）を見て判断できるように件数を出す
+  async function loadWorkerUsage() {
+    const counts = await Promise.all(workers.map(async w => {
+      const results = await Promise.all(
+        ['labor_entries', 'dispatch_assignments', 'tool_usages'].map(t =>
+          supabase.from(t).select('id', { count: 'exact', head: true }).eq('worker_id', w.id)))
+      return [w.id, results.reduce((sum, r) => sum + (r.count ?? 0), 0)] as const
+    }))
+    const map = new Map(counts)
+    setWorkers(ws => ws.map(w => ({ ...w, usage: map.get(w.id) ?? 0 })))
+  }
+
   async function renameWorker(w: Worker) {
     const name = prompt('作業員名', w.name)?.trim()
     if (!name || name === w.name) return
@@ -399,7 +420,13 @@ export default function DispatchPage() {
 
   async function setInDispatch(w: Worker, next: boolean) {
     if (next === false && !confirm(`「${w.name}」を段取りから外しますか？\n出面などの他の画面には残ります。`)) return
-    await supabase.from('workers').update({ in_dispatch: next }).eq('id', w.id)
+    const { error } = await supabase.from('workers').update({ in_dispatch: next }).eq('id', w.id)
+    if (error) {
+      setMessage(error.message.includes('in_dispatch')
+        ? '段取りの表示切り替えの準備がまだです。Supabaseでin_dispatchを追加するSQLを実行してください。'
+        : `「${w.name}」の切り替えに失敗しました。`)
+      return
+    }
     setWorkers(ws => ws.map(x => x.id === w.id ? { ...x, in_dispatch: next } : x))
     // 外した人が今日の配員に入っていたら、そこからも抜く
     if (!next && planId) {
@@ -459,7 +486,7 @@ export default function DispatchPage() {
       <section className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-4">
         <div className="flex items-center mb-2">
           <h2 className="font-bold text-sm text-amber-800">未配置（{unassigned.length}人）</h2>
-          <button onClick={() => setManagingWorkers(true)} className="ml-auto text-xs text-blue-600">
+          <button onClick={() => { setManagingWorkers(true); loadWorkerUsage() }} className="ml-auto text-xs text-blue-600">
             作業員を管理
           </button>
         </div>
@@ -700,6 +727,7 @@ export default function DispatchPage() {
             <h3 className="font-bold mb-1">段取りに出す作業員</h3>
             <p className="text-xs text-gray-500 mb-3">
               事務員や辞めた人は「外す」で段取りから消えます。出面などの他の画面と過去の記録はそのまま残ります。
+              <span className="text-red-600">同名の人がいる場合は「同名あり」と出ます。実績が多い方が本来使っている人です。</span>
             </p>
             <div className="flex gap-2 mb-3">
               <input value={newWorkerName} onChange={e => setNewWorkerName(e.target.value)}
@@ -710,9 +738,18 @@ export default function DispatchPage() {
             <div className="flex-1 overflow-y-auto">
               {workers.length === 0 && <p className="text-sm text-gray-400">作業員が登録されていません。</p>}
               {dispatchWorkers.map(w => (
-                <div key={w.id} className="flex justify-between items-center text-sm py-2.5 border-b">
-                  <span>{w.name}</span>
-                  <div className="flex items-center gap-3">
+                <div key={w.id} className="flex justify-between items-start text-sm py-2.5 border-b">
+                  <div className="min-w-0">
+                    <span>{w.name}</span>
+                    {dupNames.has(w.name.trim()) && (
+                      <span className="text-[10px] ml-1.5 px-1.5 py-0.5 rounded bg-red-100 text-red-700">同名あり</span>
+                    )}
+                    {/* 同名のどちらが本物か判断できるよう、実績の多さを出す */}
+                    <p className="text-xs text-gray-400">
+                      {w.usage === undefined ? '実績を確認中…' : `実績${w.usage}件`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
                     <button onClick={() => renameWorker(w)} className="text-xs text-blue-600">修正</button>
                     <button onClick={() => setInDispatch(w, false)} className="text-xs text-gray-400 hover:text-red-500">外す</button>
                   </div>
@@ -723,9 +760,17 @@ export default function DispatchPage() {
                 <div className="mt-4">
                   <p className="text-xs font-semibold text-gray-400 mb-1">段取りに出さない（{hiddenWorkers.length}人）</p>
                   {hiddenWorkers.map(w => (
-                    <div key={w.id} className="flex justify-between items-center text-sm py-2.5 border-b">
-                      <span className="text-gray-400">{w.name}</span>
-                      <button onClick={() => setInDispatch(w, true)} className="text-xs text-blue-600">戻す</button>
+                    <div key={w.id} className="flex justify-between items-start text-sm py-2.5 border-b">
+                      <div className="min-w-0">
+                        <span className="text-gray-400">{w.name}</span>
+                        {dupNames.has(w.name.trim()) && (
+                          <span className="text-[10px] ml-1.5 px-1.5 py-0.5 rounded bg-red-100 text-red-700">同名あり</span>
+                        )}
+                        <p className="text-xs text-gray-400">
+                          {w.usage === undefined ? '実績を確認中…' : `実績${w.usage}件`}
+                        </p>
+                      </div>
+                      <button onClick={() => setInDispatch(w, true)} className="text-xs text-blue-600 shrink-0">戻す</button>
                     </div>
                   ))}
                 </div>
