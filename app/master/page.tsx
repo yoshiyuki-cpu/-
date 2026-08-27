@@ -51,7 +51,7 @@ export default function MasterPage() {
       supabase.from('scaffold_material_prices').select('*').order('category').order('sort_order'),
       supabase.from('fuel_prices').select('*').order('fuel_type'),
       supabase.from('company_settings').select('*').eq('id', 1).single(),
-      supabase.from('projects').select('id, name, status').eq('status', 'active').is('deleted_at', null).order('name'),
+      supabase.from('projects').select('*').eq('status', 'active').order('name'),
       supabase.from('foreman_projects').select('worker_id, project_id'),
       supabase.from('support_companies').select('*').order('sort_order'),
     ])
@@ -62,7 +62,7 @@ export default function MasterPage() {
     setScaffoldPrices(sp ?? [])
     setFuelPrices(fp ?? [])
     setCompany(c)
-    setActiveProjects(pj ?? [])
+    setActiveProjects((pj ?? []).filter((p: any) => !p.deleted_at))
     setSupports(sup ?? [])
     const grouped: Record<number, number[]> = {}
     ;(fpj ?? []).forEach((l: any) => {

@@ -65,17 +65,19 @@ export default function DispatchPage() {
 
   async function load() {
     setLoading(true)
-    const [{ data: pj }, { data: sc }, { data: wk }, { data: plan }, { data: tr }] = await Promise.all([
-      supabase.from('projects').select('*').eq('status', 'active').is('deleted_at', null).order('name'),
+    const [{ data: pj }, { data: sc }, { data: wk }, { data: plan }] = await Promise.all([
+      supabase.from('projects').select('*').order('name'),
       supabase.from('support_companies').select('*').eq('active', true).order('sort_order'),
       supabase.from('workers').select('id, name, in_dispatch').order('name'),
       supabase.from('dispatch_plans').select('*').eq('date', date).maybeSingle(),
-      supabase.from('projects').select('*').not('deleted_at', 'is', null).order('deleted_at', { ascending: false }),
     ])
-    setProjects(pj ?? [])
+    // ごみ箱の振り分けはDB側で絞らずここで行う（deleted_at列が未追加の環境でも一覧が消えないようにするため）
+    const allProjects = pj ?? []
+    setProjects(allProjects.filter(p => p.status === 'active' && !p.deleted_at))
     setSupports(sc ?? [])
     setWorkers(wk ?? [])
-    setTrashed(tr ?? [])
+    setTrashed(allProjects.filter(p => p.deleted_at)
+      .sort((a, b) => (b.deleted_at ?? '').localeCompare(a.deleted_at ?? '')))
     setPlanId(plan?.id ?? null)
     setNotifiedAt(plan?.notified_at ?? null)
 
@@ -266,7 +268,12 @@ export default function DispatchPage() {
 
     const { error } = await supabase.from('projects')
       .update({ deleted_at: new Date().toISOString() }).eq('id', p.id)
-    if (error) { setMessage('ごみ箱に入れられませんでした。'); return }
+    if (error) {
+      setMessage(error.message.includes('deleted_at')
+        ? 'ごみ箱の準備がまだです。Supabaseでdeleted_atを追加するSQLを実行してください。'
+        : 'ごみ箱に入れられませんでした。')
+      return
+    }
 
     // 今日の配員に入っていたら、そこからも抜く（現場自体は残るので手動で外す）
     const gone = groups.filter(g => g.project_id === p.id).map(g => g.id)

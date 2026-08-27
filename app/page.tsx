@@ -29,12 +29,15 @@ export default function HomePage() {
     const { data: projectData } = await supabase
       .from('projects')
       .select('*')
-      .is('deleted_at', null)
       .order('created_at', { ascending: false })
 
     if (!projectData) { setLoading(false); return }
 
-    const withTotals = await Promise.all(projectData.map(async (p) => {
+    // ごみ箱に入れた現場を除く。deleted_atの絞り込みはDB側でやらずここで行う
+    // （列が未追加の環境でも一覧が消えないようにするため）
+    const visible = projectData.filter(p => !p.deleted_at)
+
+    const withTotals = await Promise.all(visible.map(async (p) => {
       const [{ data: wasteEntries }, { data: otherEntries }, { data: laborEntries }, { data: scrapRecords }] = await Promise.all([
         supabase.from('waste_entries').select('amount, waste_types(entry_type)').eq('project_id', p.id),
         supabase.from('other_entries').select('entry_type, amount').eq('project_id', p.id),
