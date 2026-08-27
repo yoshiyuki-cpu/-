@@ -3,10 +3,11 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 const NAV_ITEMS = [
-  { href: '/', label: '現場一覧', icon: '🏗️' },
+  { href: '/', label: '現場', icon: '🏗️' },
   { href: '/dispatch', label: '段取り', icon: '🚚' },
-  { href: '/estimates', label: '見積り', icon: '📄' },
-  { href: '/scaffold', label: '足場計算', icon: '📐' },
+  { href: '/tasks', label: 'やる事', icon: '✅' },
+  { href: '/estimates', label: '見積', icon: '📄' },
+  { href: '/scaffold', label: '足場', icon: '📐' },
   { href: '/attendance', label: '出面', icon: '🗓️' },
   { href: '/calendar', label: '予定', icon: '📅' },
   { href: '/master', label: 'マスタ', icon: '⚙️' },
@@ -22,11 +23,11 @@ export default function BottomNav() {
         const active = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href)
         return (
           <Link key={item.href} href={item.href}
-            className={`flex-1 flex flex-col items-center gap-0.5 pt-1.5 pb-2 text-[11px] transition ${active ? 'text-blue-700 font-semibold' : 'text-gray-400 font-medium'}`}>
-            <span className={`text-xl leading-none px-3.5 py-1 rounded-full transition ${active ? 'bg-blue-100/80' : 'opacity-55'}`}>
+            className={`flex-1 min-w-0 flex flex-col items-center gap-0.5 pt-1.5 pb-2 text-[10px] transition ${active ? 'text-blue-700 font-semibold' : 'text-gray-400 font-medium'}`}>
+            <span className={`text-lg leading-none px-2.5 py-1 rounded-full transition ${active ? 'bg-blue-100/80' : 'opacity-55'}`}>
               {item.icon}
             </span>
-            <span>{item.label}</span>
+            <span className="truncate max-w-full">{item.label}</span>
           </Link>
         )
       })}
