@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase, Project, SupportCompany, DispatchGroup } from '@/lib/supabase'
 
 type Worker = { id: number; name: string; in_dispatch: boolean }
@@ -58,6 +58,13 @@ export default function DispatchPage() {
   const [editingSupport, setEditingSupport] = useState<{ id: number; name: string } | null>(null)
   const [trashed, setTrashed] = useState<Project[]>([])
   const [showTrash, setShowTrash] = useState(false)
+  // 集合時間・集合場所・連絡事項の下書き。1文字ごとにDBへ書くと保存待ちの間に文字が落ちるため、
+  // 打った文字はここに即反映し、保存は手が止まってからまとめて行う
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  // 保存はタイマー越しに走るため、その時点の最新値をrefからも読めるようにしておく
+  // （stateだけだとタイマーを仕込んだ時点の古い値を保存してしまう）
+  const draftsRef = useRef<Record<string, string>>({})
+  const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const [managingWorkers, setManagingWorkers] = useState(false)
   const [newWorkerName, setNewWorkerName] = useState('')
 
@@ -155,11 +162,42 @@ export default function DispatchPage() {
     setAdding(null)
   }
 
-  async function updateGroupField(d: Dest, patch: Partial<DispatchGroup>) {
+  type GroupField = 'meet_time' | 'meet_place' | 'note'
+  const draftKey = (d: Dest, field: GroupField) => `${destKey(d)}:${field}`
+
+  // 画面に出す値。打ちかけの下書きがあればそれを優先する
+  function fieldValue(d: Dest, field: GroupField) {
+    const key = draftKey(d, field)
+    if (key in drafts) return drafts[key]
+    return groupOf(d)?.[field] ?? ''
+  }
+
+  // 打つたびに呼ばれる。下書きに入れて即画面へ反映し、保存は手が止まってから
+  function changeGroupField(d: Dest, field: GroupField, value: string) {
+    const key = draftKey(d, field)
+    draftsRef.current[key] = value
+    setDrafts(ds => ({ ...ds, [key]: value }))
+    setNotifiedAt(null)
+    clearTimeout(saveTimers.current[key])
+    saveTimers.current[key] = setTimeout(() => saveGroupField(d, field), 700)
+  }
+
+  // 下書きをDBへ保存する。入力欄から離れたときにも呼ぶ
+  async function saveGroupField(d: Dest, field: GroupField) {
+    const key = draftKey(d, field)
+    clearTimeout(saveTimers.current[key])
+    const value = draftsRef.current[key]
+    if (value === undefined) return
+
     const gid = await ensureGroup(d)
+    const patch = { [field]: value || null } as Partial<DispatchGroup>
     setGroups(gs => gs.map(g => g.id === gid ? { ...g, ...patch } : g))
     await supabase.from('dispatch_groups').update(patch).eq('id', gid)
-    setNotifiedAt(null)
+    // 保存できたら下書きを片付ける（以降はDBの値を表示する）。
+    // 保存中にさらに打たれていた場合は下書きを残し、最新の入力を消さないようにする
+    if (draftsRef.current[key] !== value) return
+    delete draftsRef.current[key]
+    setDrafts(ds => { const next = { ...ds }; delete next[key]; return next })
   }
 
   // 毎日ほぼ同じ配員なので、前日をそのまま持ってきて差分だけ入れ替えられるようにする
@@ -478,13 +516,16 @@ export default function DispatchPage() {
 
               <div className="grid grid-cols-2 gap-2 mb-2">
                 {/* 時刻ピッカーだと入力が手間なので、「7:30」「7時半」など自由に打てるテキスト入力にする */}
-                <input type="text" value={g?.meet_time ?? ''} placeholder="集合時間" className={inputCls}
-                  onChange={e => updateGroupField(d, { meet_time: e.target.value || null })} />
-                <input type="text" value={g?.meet_place ?? ''} placeholder="集合場所" className={inputCls}
-                  onChange={e => updateGroupField(d, { meet_place: e.target.value || null })} />
+                <input type="text" value={fieldValue(d, 'meet_time')} placeholder="集合時間" className={inputCls}
+                  onChange={e => changeGroupField(d, 'meet_time', e.target.value)}
+                  onBlur={() => saveGroupField(d, 'meet_time')} />
+                <input type="text" value={fieldValue(d, 'meet_place')} placeholder="集合場所" className={inputCls}
+                  onChange={e => changeGroupField(d, 'meet_place', e.target.value)}
+                  onBlur={() => saveGroupField(d, 'meet_place')} />
               </div>
-              <input type="text" value={g?.note ?? ''} placeholder="連絡事項（任意）" className={`${inputCls} w-full mb-2`}
-                onChange={e => updateGroupField(d, { note: e.target.value || null })} />
+              <input type="text" value={fieldValue(d, 'note')} placeholder="連絡事項（任意）" className={`${inputCls} w-full mb-2`}
+                onChange={e => changeGroupField(d, 'note', e.target.value)}
+                onBlur={() => saveGroupField(d, 'note')} />
 
               <div className="flex flex-wrap gap-1.5">
                 {ws.map(w => (
