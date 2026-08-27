@@ -292,3 +292,17 @@ export type DispatchAssignment = {
   worker_id: number
   created_at: string
 }
+
+// やること（タスク管理）
+export type Task = {
+  id: number
+  title: string
+  note: string | null
+  project_id: number | null
+  assignee_id: number | null
+  due_date: string | null
+  done_at: string | null
+  done_by: number | null
+  created_at: string
+  updated_at: string
+}
