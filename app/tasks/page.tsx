@@ -3,21 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase, Task, Project } from '@/lib/supabase'
 
 type Worker = { id: number; name: string }
-type Tab = 'todo' | 'done'
-
-// 「自分が誰か」は端末に覚えさせる。ログインが無いので、完了を押した人を
-// 毎回選ばせずに達成者として記録するため
-const ME_KEY = 'ryoshin-task-me'
-
-function loadMe(): number | null {
-  try {
-    const v = localStorage.getItem(ME_KEY)
-    return v ? Number(v) : null
-  } catch { return null }
-}
-function saveMe(id: number) {
-  try { localStorage.setItem(ME_KEY, String(id)) } catch { /* 保存できなくても動作に影響はない */ }
-}
+type Tab = 'todo' | 'done' | 'stats'
 
 function todayISO() {
   const d = new Date()
@@ -56,13 +42,14 @@ export default function TasksPage() {
   const [tab, setTab] = useState<Tab>('todo')
   const [newTitle, setNewTitle] = useState('')
   const [adding, setAdding] = useState(false)
-  const [me, setMe] = useState<number | null>(null)
-  const [pickingMe, setPickingMe] = useState(false)
+  // 達成ボタンを押したときに「誰が達成したか」を選ばせる対象のタスク。
+  // 評価に使う記録なので端末の記憶で自動的に決めず、毎回本人に選んでもらう
+  const [completing, setCompleting] = useState<Task | null>(null)
   const [editing, setEditing] = useState<Task | null>(null)
   const [projectFilter, setProjectFilter] = useState<string>('all')
   const [message, setMessage] = useState('')
 
-  useEffect(() => { setMe(loadMe()); load() }, [])
+  useEffect(() => { load() }, [])
 
   async function load() {
     const [{ data: t }, { data: pj }, { data: wk }] = await Promise.all([
@@ -93,6 +80,25 @@ export default function TasksPage() {
     .filter(t => t.done_at)
     .sort((a, b) => (b.done_at ?? '').localeCompare(a.done_at ?? '')), [tasks])
 
+  // 評価に使う集計。誰が何件達成したかを今月と累計で出す
+  const stats = useMemo(() => {
+    const now = new Date()
+    const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    const rows = workers.map(w => {
+      const mine = done.filter(t => t.done_by === w.id)
+      return {
+        id: w.id,
+        name: w.name,
+        month: mine.filter(t => (t.done_at ?? '').startsWith(monthPrefix)).length,
+        total: mine.length,
+      }
+    }).filter(r => r.total > 0)
+    rows.sort((a, b) => b.month - a.month || b.total - a.total)
+    // 達成者が記録されていない完了分も見えるようにしておく
+    const unknown = done.filter(t => !t.done_by).length
+    return { rows, unknown, monthLabel: `${now.getMonth() + 1}月` }
+  }, [workers, done])
+
   const shown = (tab === 'todo' ? todo : done)
     .filter(t => projectFilter === 'all' || String(t.project_id ?? '') === projectFilter)
 
@@ -107,17 +113,22 @@ export default function TasksPage() {
     setNewTitle('')
   }
 
-  // 完了を押した人を達成者として記録する。まだ「自分」が決まっていなければ先に選んでもらう
-  async function toggleDone(t: Task) {
-    if (t.done_at) {
-      await supabase.from('tasks').update({ done_at: null, done_by: null }).eq('id', t.id)
-      setTasks(ts => ts.map(x => x.id === t.id ? { ...x, done_at: null, done_by: null } : x))
-      return
-    }
-    if (!me) { setPickingMe(true); return }
-    const patch = { done_at: new Date().toISOString(), done_by: me }
-    await supabase.from('tasks').update(patch).eq('id', t.id)
-    setTasks(ts => ts.map(x => x.id === t.id ? { ...x, ...patch } : x))
+  // 未完了に戻す（達成者の記録も消す）
+  async function undoDone(t: Task) {
+    if (!confirm(`「${t.title}」を未完了に戻しますか？\n達成者の記録も消えます。`)) return
+    const { error } = await supabase.from('tasks').update({ done_at: null, done_by: null }).eq('id', t.id)
+    if (error) { setMessage('戻せませんでした。'); return }
+    setTasks(ts => ts.map(x => x.id === t.id ? { ...x, done_at: null, done_by: null } : x))
+  }
+
+  // 選んだ人を達成者として記録する
+  async function completeBy(workerId: number) {
+    if (!completing) return
+    const patch = { done_at: new Date().toISOString(), done_by: workerId }
+    const { error } = await supabase.from('tasks').update(patch).eq('id', completing.id)
+    if (error) { setMessage('達成を記録できませんでした。'); return }
+    setTasks(ts => ts.map(x => x.id === completing.id ? { ...x, ...patch } : x))
+    setCompleting(null)
   }
 
   async function saveEdit() {
@@ -146,12 +157,6 @@ export default function TasksPage() {
     setEditing(null)
   }
 
-  function chooseMe(id: number) {
-    saveMe(id)
-    setMe(id)
-    setPickingMe(false)
-  }
-
   if (loading) return <p className="text-center py-10 text-gray-500">読み込み中...</p>
 
   const tabClass = (t: Tab) =>
@@ -160,14 +165,9 @@ export default function TasksPage() {
 
   return (
     <div>
-      <div className="flex items-start justify-between mb-3">
-        <div>
-          <h1 className="text-xl font-bold">やること</h1>
-          <p className="text-xs text-gray-500 mt-0.5">丸を押すと完了になり、押した人が達成者として残ります。</p>
-        </div>
-        <button onClick={() => setPickingMe(true)} className="shrink-0 text-xs text-blue-600 mt-1">
-          {me ? `自分：${nameOf(me) || '未設定'}` : '自分を設定'}
-        </button>
+      <div className="mb-3">
+        <h1 className="text-xl font-bold">やること</h1>
+        <p className="text-xs text-gray-500 mt-0.5">丸を押して自分の名前を選ぶと達成になり、誰がやったかが記録に残ります。</p>
       </div>
 
       {/* 追加欄。思いついたらすぐ足せるよう一番上に置く */}
@@ -184,9 +184,38 @@ export default function TasksPage() {
       <div className="flex gap-2 mb-3">
         <button className={tabClass('todo')} onClick={() => setTab('todo')}>未完了 {todo.length}</button>
         <button className={tabClass('done')} onClick={() => setTab('done')}>完了 {done.length}</button>
+        <button className={tabClass('stats')} onClick={() => setTab('stats')}>集計</button>
       </div>
 
-      {projects.length > 0 && (
+      {tab === 'stats' && (
+        <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+          <h2 className="font-bold text-sm text-gray-700 mb-1">達成した件数</h2>
+          <p className="text-xs text-gray-500 mb-3">誰がどれだけやったかの記録です。</p>
+          {stats.rows.length === 0
+            ? <p className="text-sm text-gray-400">まだ達成の記録がありません。</p>
+            : (
+              <>
+                <div className="flex text-xs text-gray-400 pb-1.5 border-b">
+                  <span className="flex-1">名前</span>
+                  <span className="w-16 text-right">{stats.monthLabel}</span>
+                  <span className="w-16 text-right">累計</span>
+                </div>
+                {stats.rows.map(r => (
+                  <div key={r.id} className="flex items-center text-sm py-2.5 border-b last:border-0">
+                    <span className="flex-1">{r.name}</span>
+                    <span className="w-16 text-right font-bold">{r.month}</span>
+                    <span className="w-16 text-right text-gray-500">{r.total}</span>
+                  </div>
+                ))}
+              </>
+            )}
+          {stats.unknown > 0 && (
+            <p className="text-xs text-gray-400 mt-3">達成者が記録されていない完了：{stats.unknown}件</p>
+          )}
+        </section>
+      )}
+
+      {tab !== 'stats' && projects.length > 0 && (
         <select value={projectFilter} onChange={e => setProjectFilter(e.target.value)}
           className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-3 bg-white">
           <option value="all">すべての現場</option>
@@ -195,20 +224,21 @@ export default function TasksPage() {
         </select>
       )}
 
-      {shown.length === 0 && (
+      {tab !== 'stats' && shown.length === 0 && (
         <p className="text-gray-500 text-center py-10 text-sm">
           {tab === 'todo' ? 'やることはありません。' : '完了したものはまだありません。'}
         </p>
       )}
 
       <div className="flex flex-col gap-2">
-        {shown.map(t => {
+        {tab !== 'stats' && shown.map(t => {
           const due = t.due_date && !t.done_at ? dueLabel(t.due_date) : null
           const meta = [projectOf(t.project_id), nameOf(t.assignee_id) && `担当 ${nameOf(t.assignee_id)}`]
             .filter(Boolean).join(' · ')
           return (
             <div key={t.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm flex items-start gap-3 p-3.5">
-              <button onClick={() => toggleDone(t)} aria-label={t.done_at ? '未完了に戻す' : '完了にする'}
+              <button onClick={() => t.done_at ? undoDone(t) : setCompleting(t)}
+                aria-label={t.done_at ? '未完了に戻す' : '達成にする'}
                 className={`mt-0.5 w-7 h-7 rounded-full border-2 shrink-0 flex items-center justify-center transition ${
                   t.done_at ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-gray-300'
                 }`}>
@@ -235,22 +265,23 @@ export default function TasksPage() {
 
       {message && <p className="text-sm text-red-600 mt-3">{message}</p>}
 
-      {/* 自分を選ぶ。達成者の記録に使う */}
-      {pickingMe && (
-        <div className="fixed inset-0 z-50 flex items-end bg-black/40" onClick={() => setPickingMe(false)}>
-          <div className="bg-white w-full rounded-t-2xl p-4 max-h-[75vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            <h3 className="font-bold mb-1">自分の名前を選んでください</h3>
-            <p className="text-xs text-gray-500 mb-3">この端末に覚えます。完了したときの達成者として記録されます。</p>
+      {/* 達成者を選ぶ。評価に使う記録なので毎回本人に選んでもらう */}
+      {completing && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/40" onClick={() => setCompleting(null)}>
+          <div className="bg-white w-full rounded-t-2xl p-4 max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <h3 className="font-bold mb-1">達成したのは誰ですか？</h3>
+            <p className="text-xs text-gray-500 mb-1">{completing.title}</p>
+            <p className="text-xs text-gray-400 mb-3">自分の名前を探して押すと達成になります。</p>
             <div className="flex-1 overflow-y-auto flex flex-col gap-1.5">
               {workers.map(w => (
-                <button key={w.id} onClick={() => chooseMe(w.id)}
-                  className={`text-left px-3 py-2.5 rounded-xl border text-sm ${
-                    me === w.id ? 'border-blue-400 bg-blue-50 text-blue-800' : 'border-gray-200'
-                  }`}>
+                <button key={w.id} onClick={() => completeBy(w.id)}
+                  className="text-left px-3 py-3 rounded-xl border border-gray-200 text-sm active:bg-blue-50">
                   {w.name}
                 </button>
               ))}
             </div>
+            <button onClick={() => setCompleting(null)}
+              className="mt-3 w-full border border-gray-300 text-gray-600 py-2.5 rounded-lg text-sm">やめる</button>
           </div>
         </div>
       )}
