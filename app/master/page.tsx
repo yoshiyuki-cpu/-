@@ -7,6 +7,8 @@ type Worker = {
   id: number; name: string; company_name: string | null; email: string | null; is_foreman: boolean
   is_google_ads: boolean; is_x_pr: boolean
   line_user_id: string | null; line_link_code: string | null
+  in_dispatch: boolean
+  usage?: number
 }
 type ProjectOption = { id: number; name: string; status: 'active' | 'completed' }
 
@@ -58,6 +60,7 @@ export default function MasterPage() {
     setSites(s ?? [])
     setWasteTypes((w as any) ?? [])
     setWorkers(wk ?? [])
+    loadWorkerUsage(wk ?? [])
     setVehicles(v ?? [])
     setScaffoldPrices(sp ?? [])
     setFuelPrices(fp ?? [])
@@ -69,6 +72,25 @@ export default function MasterPage() {
       grouped[l.worker_id] = [...(grouped[l.worker_id] ?? []), l.project_id]
     })
     setForemanProjectIds(grouped)
+  }
+
+  // 同名の作業員がいるとき、どちらが本来使っている人かを実績の多さで判断できるようにする
+  async function loadWorkerUsage(list: Worker[]) {
+    const counts = await Promise.all(list.map(async w => {
+      const results = await Promise.all(
+        ['labor_entries', 'dispatch_assignments', 'foreman_projects'].map(t =>
+          supabase.from(t).select('*', { count: 'exact', head: true }).eq('worker_id', w.id)))
+      return [w.id, results.reduce((sum, r) => sum + (r.count ?? 0), 0)] as const
+    }))
+    const map = new Map(counts)
+    setWorkers(ws => ws.map(w => ({ ...w, usage: map.get(w.id) ?? w.usage })))
+  }
+
+  // 段取りに出すかどうか。退職者や事務の人を段取りから外す
+  async function setInDispatch(w: Worker, next: boolean) {
+    const { error } = await supabase.from('workers').update({ in_dispatch: next }).eq('id', w.id)
+    if (error) { alert(`「${w.name}」の切り替えに失敗しました。`); return }
+    setWorkers(ws => ws.map(x => x.id === w.id ? { ...x, in_dispatch: next } : x))
   }
 
   async function updateScaffoldPrice(id: number, price: string) {
@@ -181,6 +203,7 @@ export default function MasterPage() {
       company_name: newWorker.company_name || null,
       email: newWorker.email || null,
       is_foreman: newWorker.is_foreman,
+      in_dispatch: true,
     })
     setNewWorker({ name: '', company_name: '', email: '', is_foreman: false })
     loadAll()
@@ -314,6 +337,12 @@ export default function MasterPage() {
     loadAll()
   }
 
+  // 同名の作業員がいると、どちらを設定したのか分からなくなるので印を付ける
+  const dupWorkerNames = new Set(
+    Object.entries(workers.reduce((acc, w) => {
+      const k = w.name.trim(); acc[k] = (acc[k] ?? 0) + 1; return acc
+    }, {} as Record<string, number>)).filter(([, n]) => n > 1).map(([k]) => k))
+
   const filteredWaste = selectedSiteId
     ? wasteTypes.filter(w => String(w.disposal_site_id) === selectedSiteId)
     : wasteTypes
@@ -440,6 +469,7 @@ export default function MasterPage() {
         <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
           <h2 className="font-bold mb-3 text-gray-700">作業員</h2>
           <p className="text-xs text-gray-500 mb-3">
+            作業員の設定はここでまとめて管理します。「段取りに出す」を外すと段取りの候補から消えます。
             「職長」に設定すると担当現場を選べます。担当現場のある職長には、朝7:50に議事録・KY活動、夕方17:30に工事台帳記入・写真貼り付けのリマインダーが届きます。
             「広報の担当」を設定した集客担当には、夕方17:30にGoogle広告・Xの依頼が届きます。
             メールはここでアドレスを登録すれば届きます。スマホのプッシュ通知を使う場合は、本人の端末で
@@ -472,18 +502,32 @@ export default function MasterPage() {
                     {w.is_foreman && <span className="text-xs ml-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">職長</span>}
                     {w.is_google_ads && <span className="text-xs ml-1 px-1.5 py-0.5 rounded bg-sky-100 text-sky-700">Google広告</span>}
                     {w.is_x_pr && <span className="text-xs ml-1 px-1.5 py-0.5 rounded bg-gray-800 text-white">X</span>}
+                    {!w.in_dispatch && <span className="text-xs ml-1 px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">段取り外</span>}
+                    {dupWorkerNames.has(w.name.trim()) && <span className="text-xs ml-1 px-1.5 py-0.5 rounded bg-red-100 text-red-700">同名あり</span>}
                   </span>
                   <div className="flex items-center gap-2">
                     <button onClick={() => startEditWorker(w)} className="text-blue-600 text-xs">設定</button>
                     <button onClick={() => deleteWorker(w.id)} className="text-gray-300 hover:text-red-400 text-xs">削除</button>
                   </div>
                 </div>
-                {w.email && <p className="text-xs text-gray-400 mt-0.5">{w.email}</p>}
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {w.usage === undefined ? '実績を確認中…' : `実績${w.usage}件`}
+                  {w.email && ` · ${w.email}`}
+                </p>
 
                 {editingWorkerId === w.id && (
                   <div className="mt-2 border border-gray-200 rounded-xl p-3 bg-gray-50 flex flex-col gap-2">
                     <input type="email" className="border border-gray-200 rounded-xl px-3 py-2 text-sm" defaultValue={w.email ?? ''}
                       id={`email-${w.id}`} placeholder="メールアドレス" />
+                    <label className="flex items-center gap-2 text-sm text-gray-600">
+                      <input type="checkbox" checked={w.in_dispatch}
+                        onChange={e => setInDispatch(w, e.target.checked)} />
+                      段取りに出す
+                    </label>
+                    <p className="text-xs text-gray-500 -mt-1">
+                      事務の人や辞めた人はチェックを外してください。段取りの候補に出なくなります。
+                      出面などの他の画面と過去の記録はそのまま残ります。
+                    </p>
                     <label className="flex items-center gap-2 text-sm text-gray-600">
                       <input type="checkbox" defaultChecked={w.is_foreman} id={`foreman-${w.id}`} />
                       職長として登録する
