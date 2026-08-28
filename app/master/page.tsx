@@ -41,6 +41,9 @@ export default function MasterPage() {
   const [company, setCompany] = useState<CompanySettings | null>(null)
   const [savingCompany, setSavingCompany] = useState(false)
   const [uploadingStamp, setUploadingStamp] = useState(false)
+  // マスタの名前直し。記録は名前ではなくID（内部の番号）で紐づいているので、
+  // 名前を変えても人工記録・廃材記録・原価などは一切壊れない
+  const [editingName, setEditingName] = useState<{ table: string; id: number; column: string; value: string } | null>(null)
 
   useEffect(() => { loadAll() }, [])
 
@@ -72,6 +75,40 @@ export default function MasterPage() {
       grouped[l.worker_id] = [...(grouped[l.worker_id] ?? []), l.project_id]
     })
     setForemanProjectIds(grouped)
+  }
+
+  async function saveName() {
+    if (!editingName) return
+    const value = editingName.value.trim()
+    if (!value) return
+    const { error } = await supabase.from(editingName.table)
+      .update({ [editingName.column]: value }).eq('id', editingName.id)
+    if (error) { alert('名前の修正に失敗しました。'); return }
+    setEditingName(null)
+    loadAll()
+  }
+
+  // 名前を押すと直せるようにする共通の表示。単価の編集と同じ操作感に揃えている
+  function nameCell(table: string, id: number, column: string, current: string, extra?: React.ReactNode) {
+    const on = editingName && editingName.table === table && editingName.id === id && editingName.column === column
+    if (on) {
+      return (
+        <span className="flex items-center gap-1">
+          <input autoFocus className="border border-gray-200 rounded-lg px-2 py-1 text-sm min-w-0 flex-1"
+            value={editingName!.value}
+            onChange={e => setEditingName({ ...editingName!, value: e.target.value })}
+            onKeyDown={e => { if (e.key === 'Enter') saveName(); if (e.key === 'Escape') setEditingName(null) }} />
+          <button onClick={saveName} className="text-blue-600 text-xs px-1">✓</button>
+          <button onClick={() => setEditingName(null)} className="text-gray-400 text-xs px-1">✕</button>
+        </span>
+      )
+    }
+    return (
+      <button onClick={() => setEditingName({ table, id, column, value: current })}
+        className="text-left hover:text-blue-600">
+        {current}{extra}
+      </button>
+    )
   }
 
   // 同名の作業員がいるとき、どちらが本来使っている人かを実績の多さで判断できるようにする
@@ -224,8 +261,11 @@ export default function MasterPage() {
     setEditingWorkerProjectIds(foremanProjectIds[w.id] ?? [])
   }
 
-  async function saveWorkerForeman(w: Worker, email: string, isForeman: boolean, isGoogleAds: boolean, isXPr: boolean) {
+  async function saveWorkerForeman(w: Worker, name: string, email: string, isForeman: boolean, isGoogleAds: boolean, isXPr: boolean) {
+    // 名前は記録との紐づけに使っていない（IDで紐づく）ので、直しても記録は壊れない
+    const nextName = name.trim() || w.name
     await supabase.from('workers').update({
+      name: nextName,
       email: email || null,
       is_foreman: isForeman,
       is_google_ads: isGoogleAds,
@@ -383,7 +423,7 @@ export default function MasterPage() {
             <div className="flex flex-col gap-1">
               {sites.map(s => (
                 <div key={s.id} className="flex justify-between items-center text-sm py-1 border-b last:border-0">
-                  <span>{s.name}</span>
+                  {nameCell('disposal_sites', s.id, 'name', s.name)}
                   <button onClick={() => deleteSite(s.id)} className="text-gray-300 hover:text-red-400 text-xs">削除</button>
                 </div>
               ))}
@@ -435,7 +475,7 @@ export default function MasterPage() {
                 <div key={w.id} className="flex justify-between items-center text-sm py-2 border-b last:border-0">
                   <div>
                     <span className="text-gray-500 text-xs">{(w as any).disposal_sites?.name}　</span>
-                    <span>{w.name}</span>
+                    {nameCell('waste_types', w.id, 'name', w.name)}
                     <span className={`text-xs ml-1 px-1 rounded ${w.entry_type === 'revenue' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
                       {w.entry_type === 'revenue' ? '収益' : '処分費'}
                     </span>
@@ -517,6 +557,14 @@ export default function MasterPage() {
 
                 {editingWorkerId === w.id && (
                   <div className="mt-2 border border-gray-200 rounded-xl p-3 bg-gray-50 flex flex-col gap-2">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">名前</label>
+                      <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" defaultValue={w.name}
+                        id={`name-${w.id}`} placeholder="作業員名" />
+                      <p className="text-xs text-gray-400 mt-1">
+                        名前を直しても人工記録や原価はそのまま残ります。
+                      </p>
+                    </div>
                     <input type="email" className="border border-gray-200 rounded-xl px-3 py-2 text-sm" defaultValue={w.email ?? ''}
                       id={`email-${w.id}`} placeholder="メールアドレス" />
                     <label className="flex items-center gap-2 text-sm text-gray-600">
@@ -580,11 +628,12 @@ export default function MasterPage() {
                     <div className="flex gap-2">
                       <button
                         onClick={() => {
+                          const nameInput = document.getElementById(`name-${w.id}`) as HTMLInputElement
                           const emailInput = document.getElementById(`email-${w.id}`) as HTMLInputElement
                           const foremanInput = document.getElementById(`foreman-${w.id}`) as HTMLInputElement
                           const gadsInput = document.getElementById(`gads-${w.id}`) as HTMLInputElement
                           const xprInput = document.getElementById(`xpr-${w.id}`) as HTMLInputElement
-                          saveWorkerForeman(w, emailInput.value, foremanInput.checked, gadsInput.checked, xprInput.checked)
+                          saveWorkerForeman(w, nameInput.value, emailInput.value, foremanInput.checked, gadsInput.checked, xprInput.checked)
                         }}
                         className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm">保存</button>
                       <button onClick={() => setEditingWorkerId(null)} className="flex-1 border border-gray-300 text-gray-600 py-2 rounded-lg text-sm">キャンセル</button>
@@ -620,7 +669,9 @@ export default function MasterPage() {
             {supports.length === 0 && <p className="text-sm text-gray-400">登録なし</p>}
             {supports.map(s => (
               <div key={s.id} className="flex justify-between items-center text-sm py-2 border-b last:border-0">
-                <span className={s.active ? '' : 'text-gray-400 line-through'}>{s.name}</span>
+                <span className={s.active ? '' : 'text-gray-400 line-through'}>
+                  {nameCell('support_companies', s.id, 'name', s.name)}
+                </span>
                 <div className="flex items-center gap-2">
                   <button onClick={() => toggleSupportActive(s)} className="text-xs text-blue-600">
                     {s.active ? '使わない' : '使う'}
@@ -673,7 +724,7 @@ export default function MasterPage() {
               <div className="flex flex-col gap-1">
                 {vehicles.filter(v => v.category === cat).map(v => (
                   <div key={v.id} className="flex justify-between items-center text-sm py-2 border-b last:border-0">
-                    <span>{v.name}</span>
+                    {nameCell('vehicles', v.id, 'name', v.name)}
                     <div className="flex items-center gap-2">
                       {editingVehiclePrice?.id === v.id ? (
                         <div className="flex items-center gap-1">
@@ -740,7 +791,7 @@ export default function MasterPage() {
           <div className="flex flex-col gap-1">
             {scaffoldPrices.filter(p => p.category === 'usage').map(p => (
               <div key={p.id} className="flex justify-between items-center text-sm py-2 border-b last:border-0">
-                <span>{p.label}</span>
+                {nameCell('scaffold_material_prices', p.id, 'label', p.label)}
                 <div className="flex items-center gap-2">
                   {editingScaffoldPrice?.id === p.id ? (
                     <div className="flex items-center gap-1">
