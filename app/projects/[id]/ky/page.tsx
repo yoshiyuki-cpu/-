@@ -8,7 +8,8 @@ const today = new Date().toISOString().split('T')[0]
 export default function KyPage() {
   const { id } = useParams()
   const router = useRouter()
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const cameraInputRef = useRef<HTMLInputElement>(null)
+  const albumInputRef = useRef<HTMLInputElement>(null)
   const [photos, setPhotos] = useState<KyPhoto[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
@@ -30,12 +31,20 @@ export default function KyPage() {
     setLoading(false)
   }
 
+  // 撮影・アルバムどちらの入力欄からでも呼ばれるので、両方まとめて空に戻す
+  function clearInputs() {
+    if (cameraInputRef.current) cameraInputRef.current.value = ''
+    if (albumInputRef.current) albumInputRef.current.value = ''
+  }
+
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
     setUploading(true)
 
-    const ext = file.name.split('.').pop()
+    // アルバムから選んだ写真は拡張子が付かない事もあるので、無い時はjpgとして扱う
+    const dot = file.name.lastIndexOf('.')
+    const ext = dot > 0 ? file.name.slice(dot + 1).toLowerCase() : 'jpg'
     const path = `ky/${id}/${Date.now()}.${ext}`
 
     const { error: uploadError } = await supabase.storage
@@ -45,7 +54,7 @@ export default function KyPage() {
     if (uploadError) {
       alert('アップロードに失敗しました: ' + uploadError.message)
       setUploading(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
+      clearInputs()
       return
     }
 
@@ -59,7 +68,7 @@ export default function KyPage() {
 
     await load()
     setUploading(false)
-    if (fileInputRef.current) fileInputRef.current.value = ''
+    clearInputs()
   }
 
   async function confirmDelete() {
@@ -128,30 +137,43 @@ export default function KyPage() {
           <input type="date" className="w-full border rounded px-3 py-3"
             value={uploadDate} onChange={e => setUploadDate(e.target.value)} />
         </div>
-        <label className={`flex flex-col items-center justify-center w-full border-2 border-dashed rounded-lg py-6 cursor-pointer transition
-          ${uploading ? 'border-gray-200 bg-gray-50' : 'border-blue-300 bg-blue-50 hover:bg-blue-100'}`}>
-          {uploading ? (
-            <div className="text-center">
-              <div className="text-2xl mb-1">⏳</div>
-              <p className="text-sm text-gray-500">アップロード中...</p>
-            </div>
-          ) : (
-            <div className="text-center">
+        {uploading ? (
+          <div className="flex flex-col items-center justify-center w-full border-2 border-dashed border-gray-200 bg-gray-50 rounded-lg py-6">
+            <div className="text-2xl mb-1">⏳</div>
+            <p className="text-sm text-gray-500">アップロード中...</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            {/* その場で撮る場合はカメラを直接起動する */}
+            <label className="flex flex-col items-center justify-center border-2 border-dashed border-blue-300 bg-blue-50 hover:bg-blue-100 rounded-lg py-6 cursor-pointer transition">
               <div className="text-3xl mb-1">📷</div>
-              <p className="text-sm font-medium text-blue-700">タップして写真を撮影・選択</p>
-              <p className="text-xs text-gray-400 mt-1">KY用紙を撮影してください</p>
-            </div>
-          )}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            disabled={uploading}
-            onChange={handleFileSelect}
-          />
-        </label>
+              <p className="text-sm font-medium text-blue-700">撮影する</p>
+              <p className="text-xs text-gray-400 mt-1">カメラが開きます</p>
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={handleFileSelect}
+              />
+            </label>
+            {/* 撮影済みの写真を使う場合。capture を付けないとアルバムから選べる */}
+            <label className="flex flex-col items-center justify-center border-2 border-dashed border-blue-300 bg-blue-50 hover:bg-blue-100 rounded-lg py-6 cursor-pointer transition">
+              <div className="text-3xl mb-1">🖼️</div>
+              <p className="text-sm font-medium text-blue-700">アルバムから選ぶ</p>
+              <p className="text-xs text-gray-400 mt-1">カメラフォルダ</p>
+              <input
+                ref={albumInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleFileSelect}
+              />
+            </label>
+          </div>
+        )}
+        <p className="text-xs text-gray-400 mt-2 text-center">KY用紙の写真を登録してください</p>
       </div>
 
       {/* 写真一覧 */}
