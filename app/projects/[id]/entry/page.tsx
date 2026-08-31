@@ -81,6 +81,7 @@ export default function EntryPage() {
   }
 
   const isFirstVehicleUse = tab === 'lease' && !!otherForm.vehicle_id && !recordedVehicleIds.has(Number(otherForm.vehicle_id))
+  const selectedVehicle = vehicles.find(v => String(v.id) === otherForm.vehicle_id)
 
   function toggleWorker(workerId: number) {
     setWorkerDayType(prev => {
@@ -144,7 +145,8 @@ export default function EntryPage() {
     e.preventDefault()
     const amount = Number(otherForm.unit_price)
     if (!amount) return
-    if (isFirstVehicleUse && !Number(otherForm.mobilization_fee)) return
+    // 「0」は回送費なしとして通す。未入力（空欄）のときだけ止める
+    if (isFirstVehicleUse && otherForm.mobilization_fee.trim() === '') return
     setSaving(true)
     const vehicleId = tab === 'lease' && otherForm.vehicle_id ? Number(otherForm.vehicle_id) : null
     const rows = [{
@@ -158,8 +160,9 @@ export default function EntryPage() {
       fuel_type: tab === 'fuel' ? (otherForm.fuel_type || null) : null,
       vehicle_id: vehicleId,
     }]
-    if (isFirstVehicleUse && vehicleId) {
-      const mobilizationAmount = Number(otherForm.mobilization_fee)
+    const mobilizationAmount = Number(otherForm.mobilization_fee)
+    // 回送費0（自走するトラックなど）のときは回送費の行を作らない
+    if (isFirstVehicleUse && vehicleId && mobilizationAmount > 0) {
       rows.push({
         project_id: Number(id),
         entry_type: tab,
@@ -331,7 +334,12 @@ export default function EntryPage() {
                   onChange={e => {
                     const vid = e.target.value
                     const v = vehicles.find(v => String(v.id) === vid)
-                    setOtherForm(f => ({ ...f, vehicle_id: vid, unit_price: v?.default_price ? String(v.default_price) : f.unit_price, mobilization_fee: '' }))
+                    setOtherForm(f => ({
+                      ...f, vehicle_id: vid,
+                      unit_price: v?.default_price ? String(v.default_price) : f.unit_price,
+                      // マスタに回送費があれば入れておく（0=回送費なしも含む）。無ければ従来通り手入力
+                      mobilization_fee: v?.default_mobilization_fee != null ? String(v.default_mobilization_fee) : '',
+                    }))
                   }}>
                   <option value="">選択してください</option>
                   {vehicles.filter(v => v.category === otherForm.vehicle_category).map(v => (
@@ -344,7 +352,11 @@ export default function EntryPage() {
                   <label className="block text-sm font-medium mb-1">回送費（円・この現場でこの重機は初回のため必須）</label>
                   <input type="number" inputMode="numeric" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base" value={otherForm.mobilization_fee}
                     onChange={e => setOtherForm({ ...otherForm, mobilization_fee: e.target.value })} placeholder="0" />
-                  <p className="text-xs text-gray-400 mt-1">この現場でこの車両・重機を車両代に記録するのは初めてです。搬入出の回送費を入力してください</p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {selectedVehicle?.default_mobilization_fee != null
+                      ? 'マスタに登録された回送費が入っています。この現場で違う場合はここで直してください（0なら回送費なしとして記録しません）'
+                      : 'この現場でこの車両・重機を車両代に記録するのは初めてです。搬入出の回送費を入力してください（回送費がかからない車両は0）。毎回同じ額ならマスタに登録しておけます'}
+                  </p>
                 </div>
               )}
             </>

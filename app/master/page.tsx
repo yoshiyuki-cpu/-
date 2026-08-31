@@ -1,21 +1,25 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { supabase, DisposalSite, WasteType, CompanySettings, Vehicle, ScaffoldMaterialPrice, FuelPrice } from '@/lib/supabase'
+import { supabase, DisposalSite, WasteType, CompanySettings, Vehicle, ScaffoldMaterialPrice, FuelPrice, SupportCompany } from '@/lib/supabase'
 import Link from 'next/link'
 
 type Worker = {
   id: number; name: string; company_name: string | null; email: string | null; is_foreman: boolean
   is_google_ads: boolean; is_x_pr: boolean
   line_user_id: string | null; line_link_code: string | null
+  in_dispatch: boolean
+  usage?: number
 }
 type ProjectOption = { id: number; name: string; status: 'active' | 'completed' }
 
 export default function MasterPage() {
-  const [tab, setTab] = useState<'disposal' | 'worker' | 'vehicle' | 'scaffold' | 'fuel' | 'company'>('disposal')
+  const [tab, setTab] = useState<'disposal' | 'worker' | 'support' | 'vehicle' | 'scaffold' | 'fuel' | 'company'>('disposal')
   const [sites, setSites] = useState<DisposalSite[]>([])
   const [wasteTypes, setWasteTypes] = useState<(WasteType & { disposal_sites?: DisposalSite })[]>([])
   const [workers, setWorkers] = useState<Worker[]>([])
   const [activeProjects, setActiveProjects] = useState<ProjectOption[]>([])
+  const [supports, setSupports] = useState<SupportCompany[]>([])
+  const [newSupportName, setNewSupportName] = useState('')
   const [foremanProjectIds, setForemanProjectIds] = useState<Record<number, number[]>>({})
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [scaffoldPrices, setScaffoldPrices] = useState<ScaffoldMaterialPrice[]>([])
@@ -33,15 +37,19 @@ export default function MasterPage() {
   const [testResult, setTestResult] = useState<{ id: number; text: string } | null>(null)
   const [newVehicle, setNewVehicle] = useState({ name: '', category: 'rental' as 'rental' | 'owned', default_price: '', unit: '日' })
   const [editingVehiclePrice, setEditingVehiclePrice] = useState<{ id: number; price: string } | null>(null)
+  const [editingVehicleFee, setEditingVehicleFee] = useState<{ id: number; fee: string } | null>(null)
   const [editingFuelPrice, setEditingFuelPrice] = useState<{ id: number; price: string } | null>(null)
   const [company, setCompany] = useState<CompanySettings | null>(null)
   const [savingCompany, setSavingCompany] = useState(false)
   const [uploadingStamp, setUploadingStamp] = useState(false)
+  // マスタの名前直し。記録は名前ではなくID（内部の番号）で紐づいているので、
+  // 名前を変えても人工記録・廃材記録・原価などは一切壊れない
+  const [editingName, setEditingName] = useState<{ table: string; id: number; column: string; value: string } | null>(null)
 
   useEffect(() => { loadAll() }, [])
 
   async function loadAll() {
-    const [{ data: s }, { data: w }, { data: wk }, { data: v }, { data: sp }, { data: fp }, { data: c }, { data: pj }, { data: fpj }] = await Promise.all([
+    const [{ data: s }, { data: w }, { data: wk }, { data: v }, { data: sp }, { data: fp }, { data: c }, { data: pj }, { data: fpj }, { data: sup }] = await Promise.all([
       supabase.from('disposal_sites').select('*').order('name'),
       supabase.from('waste_types').select('*, disposal_sites(name)').order('name'),
       supabase.from('workers').select('*').order('name'),
@@ -49,22 +57,78 @@ export default function MasterPage() {
       supabase.from('scaffold_material_prices').select('*').order('category').order('sort_order'),
       supabase.from('fuel_prices').select('*').order('fuel_type'),
       supabase.from('company_settings').select('*').eq('id', 1).single(),
-      supabase.from('projects').select('id, name, status').eq('status', 'active').order('name'),
+      supabase.from('projects').select('*').eq('status', 'active').order('name'),
       supabase.from('foreman_projects').select('worker_id, project_id'),
+      supabase.from('support_companies').select('*').order('sort_order'),
     ])
     setSites(s ?? [])
     setWasteTypes((w as any) ?? [])
     setWorkers(wk ?? [])
+    loadWorkerUsage(wk ?? [])
     setVehicles(v ?? [])
     setScaffoldPrices(sp ?? [])
     setFuelPrices(fp ?? [])
     setCompany(c)
-    setActiveProjects(pj ?? [])
+    setActiveProjects((pj ?? []).filter((p: any) => !p.deleted_at))
+    setSupports(sup ?? [])
     const grouped: Record<number, number[]> = {}
     ;(fpj ?? []).forEach((l: any) => {
       grouped[l.worker_id] = [...(grouped[l.worker_id] ?? []), l.project_id]
     })
     setForemanProjectIds(grouped)
+  }
+
+  async function saveName() {
+    if (!editingName) return
+    const value = editingName.value.trim()
+    if (!value) return
+    const { error } = await supabase.from(editingName.table)
+      .update({ [editingName.column]: value }).eq('id', editingName.id)
+    if (error) { alert('名前の修正に失敗しました。'); return }
+    setEditingName(null)
+    loadAll()
+  }
+
+  // 名前を押すと直せるようにする共通の表示。単価の編集と同じ操作感に揃えている
+  function nameCell(table: string, id: number, column: string, current: string, extra?: React.ReactNode) {
+    const on = editingName && editingName.table === table && editingName.id === id && editingName.column === column
+    if (on) {
+      return (
+        <span className="flex items-center gap-1">
+          <input autoFocus className="border border-gray-200 rounded-lg px-2 py-1 text-sm min-w-0 flex-1"
+            value={editingName!.value}
+            onChange={e => setEditingName({ ...editingName!, value: e.target.value })}
+            onKeyDown={e => { if (e.key === 'Enter') saveName(); if (e.key === 'Escape') setEditingName(null) }} />
+          <button onClick={saveName} className="text-blue-600 text-xs px-1">✓</button>
+          <button onClick={() => setEditingName(null)} className="text-gray-400 text-xs px-1">✕</button>
+        </span>
+      )
+    }
+    return (
+      <button onClick={() => setEditingName({ table, id, column, value: current })}
+        className="text-left hover:text-blue-600">
+        {current}{extra}
+      </button>
+    )
+  }
+
+  // 同名の作業員がいるとき、どちらが本来使っている人かを実績の多さで判断できるようにする
+  async function loadWorkerUsage(list: Worker[]) {
+    const counts = await Promise.all(list.map(async w => {
+      const results = await Promise.all(
+        ['labor_entries', 'dispatch_assignments', 'foreman_projects'].map(t =>
+          supabase.from(t).select('*', { count: 'exact', head: true }).eq('worker_id', w.id)))
+      return [w.id, results.reduce((sum, r) => sum + (r.count ?? 0), 0)] as const
+    }))
+    const map = new Map(counts)
+    setWorkers(ws => ws.map(w => ({ ...w, usage: map.get(w.id) ?? w.usage })))
+  }
+
+  // 段取りに出すかどうか。退職者や事務の人を段取りから外す
+  async function setInDispatch(w: Worker, next: boolean) {
+    const { error } = await supabase.from('workers').update({ in_dispatch: next }).eq('id', w.id)
+    if (error) { alert(`「${w.name}」の切り替えに失敗しました。`); return }
+    setWorkers(ws => ws.map(x => x.id === w.id ? { ...x, in_dispatch: next } : x))
   }
 
   async function updateScaffoldPrice(id: number, price: string) {
@@ -177,6 +241,7 @@ export default function MasterPage() {
       company_name: newWorker.company_name || null,
       email: newWorker.email || null,
       is_foreman: newWorker.is_foreman,
+      in_dispatch: true,
     })
     setNewWorker({ name: '', company_name: '', email: '', is_foreman: false })
     loadAll()
@@ -197,8 +262,11 @@ export default function MasterPage() {
     setEditingWorkerProjectIds(foremanProjectIds[w.id] ?? [])
   }
 
-  async function saveWorkerForeman(w: Worker, email: string, isForeman: boolean, isGoogleAds: boolean, isXPr: boolean) {
+  async function saveWorkerForeman(w: Worker, name: string, email: string, isForeman: boolean, isGoogleAds: boolean, isXPr: boolean) {
+    // 名前は記録との紐づけに使っていない（IDで紐づく）ので、直しても記録は壊れない
+    const nextName = name.trim() || w.name
     await supabase.from('workers').update({
+      name: nextName,
       email: email || null,
       is_foreman: isForeman,
       is_google_ads: isGoogleAds,
@@ -259,6 +327,29 @@ export default function MasterPage() {
     setTestSending(null)
   }
 
+  async function addSupport() {
+    if (!newSupportName) return
+    const nextOrder = Math.max(0, ...supports.map(x => x.sort_order)) + 1
+    await supabase.from('support_companies').insert({ name: newSupportName, sort_order: nextOrder })
+    setNewSupportName('')
+    loadAll()
+  }
+
+  async function toggleSupportActive(s: SupportCompany) {
+    await supabase.from('support_companies').update({ active: !s.active }).eq('id', s.id)
+    loadAll()
+  }
+
+  async function deleteSupport(id: number) {
+    if (!confirm('この応援先を削除しますか？')) return
+    const { error } = await supabase.from('support_companies').delete().eq('id', id)
+    if (error) {
+      alert('この応援先は過去の段取りで使われているため削除できません。「使わない」に切り替えてください。')
+      return
+    }
+    loadAll()
+  }
+
   async function addVehicle() {
     if (!newVehicle.name) return
     await supabase.from('vehicles').insert({
@@ -277,6 +368,20 @@ export default function MasterPage() {
     loadAll()
   }
 
+  async function updateVehicleFee(id: number, fee: string) {
+    // 「0」は「回送費なし」として登録したいので、空欄だけを未登録として扱う
+    const value = fee.trim() === '' ? null : Number(fee)
+    const { error } = await supabase.from('vehicles').update({ default_mobilization_fee: value }).eq('id', id)
+    if (error) {
+      alert(error.message.includes('default_mobilization_fee')
+        ? '回送費の準備がまだです。Supabaseで supabase-schema-vehicle-mobilization-fee.sql を実行してください。'
+        : '回送費を保存できませんでした。')
+      return
+    }
+    setEditingVehicleFee(null)
+    loadAll()
+  }
+
   async function deleteVehicle(id: number) {
     if (!confirm('この車両・重機を削除しますか？')) return
     const { error } = await supabase.from('vehicles').delete().eq('id', id)
@@ -286,6 +391,12 @@ export default function MasterPage() {
     }
     loadAll()
   }
+
+  // 同名の作業員がいると、どちらを設定したのか分からなくなるので印を付ける
+  const dupWorkerNames = new Set(
+    Object.entries(workers.reduce((acc, w) => {
+      const k = w.name.trim(); acc[k] = (acc[k] ?? 0) + 1; return acc
+    }, {} as Record<string, number>)).filter(([, n]) => n > 1).map(([k]) => k))
 
   const filteredWaste = selectedSiteId
     ? wasteTypes.filter(w => String(w.disposal_site_id) === selectedSiteId)
@@ -308,6 +419,7 @@ export default function MasterPage() {
       <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1">
         <button className={tabClass('disposal')} onClick={() => setTab('disposal')}>処分場・廃材</button>
         <button className={tabClass('worker')} onClick={() => setTab('worker')}>作業員</button>
+        <button className={tabClass('support')} onClick={() => setTab('support')}>応援先</button>
         <button className={tabClass('vehicle')} onClick={() => setTab('vehicle')}>車両・重機</button>
         <button className={tabClass('scaffold')} onClick={() => setTab('scaffold')}>足場材料単価</button>
         <button className={tabClass('fuel')} onClick={() => setTab('fuel')}>燃料単価</button>
@@ -326,7 +438,7 @@ export default function MasterPage() {
             <div className="flex flex-col gap-1">
               {sites.map(s => (
                 <div key={s.id} className="flex justify-between items-center text-sm py-1 border-b last:border-0">
-                  <span>{s.name}</span>
+                  {nameCell('disposal_sites', s.id, 'name', s.name)}
                   <button onClick={() => deleteSite(s.id)} className="text-gray-300 hover:text-red-400 text-xs">削除</button>
                 </div>
               ))}
@@ -378,7 +490,7 @@ export default function MasterPage() {
                 <div key={w.id} className="flex justify-between items-center text-sm py-2 border-b last:border-0">
                   <div>
                     <span className="text-gray-500 text-xs">{(w as any).disposal_sites?.name}　</span>
-                    <span>{w.name}</span>
+                    {nameCell('waste_types', w.id, 'name', w.name)}
                     <span className={`text-xs ml-1 px-1 rounded ${w.entry_type === 'revenue' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
                       {w.entry_type === 'revenue' ? '収益' : '処分費'}
                     </span>
@@ -412,6 +524,7 @@ export default function MasterPage() {
         <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
           <h2 className="font-bold mb-3 text-gray-700">作業員</h2>
           <p className="text-xs text-gray-500 mb-3">
+            作業員の設定はここでまとめて管理します。「段取りに出す」を外すと段取りの候補から消えます。
             「職長」に設定すると担当現場を選べます。担当現場のある職長には、朝7:50に議事録・KY活動、夕方17:30に工事台帳記入・写真貼り付けのリマインダーが届きます。
             「広報の担当」を設定した集客担当には、夕方17:30にGoogle広告・Xの依頼が届きます。
             メールはここでアドレスを登録すれば届きます。スマホのプッシュ通知を使う場合は、本人の端末で
@@ -444,18 +557,40 @@ export default function MasterPage() {
                     {w.is_foreman && <span className="text-xs ml-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">職長</span>}
                     {w.is_google_ads && <span className="text-xs ml-1 px-1.5 py-0.5 rounded bg-sky-100 text-sky-700">Google広告</span>}
                     {w.is_x_pr && <span className="text-xs ml-1 px-1.5 py-0.5 rounded bg-gray-800 text-white">X</span>}
+                    {!w.in_dispatch && <span className="text-xs ml-1 px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">段取り外</span>}
+                    {dupWorkerNames.has(w.name.trim()) && <span className="text-xs ml-1 px-1.5 py-0.5 rounded bg-red-100 text-red-700">同名あり</span>}
                   </span>
                   <div className="flex items-center gap-2">
                     <button onClick={() => startEditWorker(w)} className="text-blue-600 text-xs">設定</button>
                     <button onClick={() => deleteWorker(w.id)} className="text-gray-300 hover:text-red-400 text-xs">削除</button>
                   </div>
                 </div>
-                {w.email && <p className="text-xs text-gray-400 mt-0.5">{w.email}</p>}
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {w.usage === undefined ? '実績を確認中…' : `実績${w.usage}件`}
+                  {w.email && ` · ${w.email}`}
+                </p>
 
                 {editingWorkerId === w.id && (
                   <div className="mt-2 border border-gray-200 rounded-xl p-3 bg-gray-50 flex flex-col gap-2">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">名前</label>
+                      <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" defaultValue={w.name}
+                        id={`name-${w.id}`} placeholder="作業員名" />
+                      <p className="text-xs text-gray-400 mt-1">
+                        名前を直しても人工記録や原価はそのまま残ります。
+                      </p>
+                    </div>
                     <input type="email" className="border border-gray-200 rounded-xl px-3 py-2 text-sm" defaultValue={w.email ?? ''}
                       id={`email-${w.id}`} placeholder="メールアドレス" />
+                    <label className="flex items-center gap-2 text-sm text-gray-600">
+                      <input type="checkbox" checked={w.in_dispatch}
+                        onChange={e => setInDispatch(w, e.target.checked)} />
+                      段取りに出す
+                    </label>
+                    <p className="text-xs text-gray-500 -mt-1">
+                      事務の人や辞めた人はチェックを外してください。段取りの候補に出なくなります。
+                      出面などの他の画面と過去の記録はそのまま残ります。
+                    </p>
                     <label className="flex items-center gap-2 text-sm text-gray-600">
                       <input type="checkbox" defaultChecked={w.is_foreman} id={`foreman-${w.id}`} />
                       職長として登録する
@@ -508,11 +643,12 @@ export default function MasterPage() {
                     <div className="flex gap-2">
                       <button
                         onClick={() => {
+                          const nameInput = document.getElementById(`name-${w.id}`) as HTMLInputElement
                           const emailInput = document.getElementById(`email-${w.id}`) as HTMLInputElement
                           const foremanInput = document.getElementById(`foreman-${w.id}`) as HTMLInputElement
                           const gadsInput = document.getElementById(`gads-${w.id}`) as HTMLInputElement
                           const xprInput = document.getElementById(`xpr-${w.id}`) as HTMLInputElement
-                          saveWorkerForeman(w, emailInput.value, foremanInput.checked, gadsInput.checked, xprInput.checked)
+                          saveWorkerForeman(w, nameInput.value, emailInput.value, foremanInput.checked, gadsInput.checked, xprInput.checked)
                         }}
                         className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm">保存</button>
                       <button onClick={() => setEditingWorkerId(null)} className="flex-1 border border-gray-300 text-gray-600 py-2 rounded-lg text-sm">キャンセル</button>
@@ -532,11 +668,45 @@ export default function MasterPage() {
         </section>
       )}
 
+      {tab === 'support' && (
+        <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+          <h2 className="font-bold mb-3 text-gray-700">応援先</h2>
+          <p className="text-xs text-gray-500 mb-3">
+            他社へ人を貸す応援先です。ここに登録した会社が<Link href="/dispatch" className="text-blue-600 underline">段取り</Link>画面の行き先に並びます。
+            過去の段取りで使った応援先は削除できないので、使わなくなったら「使わない」に切り替えてください。
+          </p>
+          <div className="flex gap-2 mb-3">
+            <input className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm" value={newSupportName}
+              onChange={e => setNewSupportName(e.target.value)} placeholder="応援先の会社名" />
+            <button onClick={addSupport} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm">追加</button>
+          </div>
+          <div className="flex flex-col gap-1">
+            {supports.length === 0 && <p className="text-sm text-gray-400">登録なし</p>}
+            {supports.map(s => (
+              <div key={s.id} className="flex justify-between items-center text-sm py-2 border-b last:border-0">
+                <span className={s.active ? '' : 'text-gray-400 line-through'}>
+                  {nameCell('support_companies', s.id, 'name', s.name)}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => toggleSupportActive(s)} className="text-xs text-blue-600">
+                    {s.active ? '使わない' : '使う'}
+                  </button>
+                  <button onClick={() => deleteSupport(s.id)} className="text-gray-300 hover:text-red-400 text-xs">削除</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {tab === 'vehicle' && (
         <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
           <h2 className="font-bold mb-3 text-gray-700">車両・重機</h2>
           <p className="text-xs text-gray-500 mb-3">
             単価を設定すると入力画面で自動入力されますが、その場での金額変更もできます。月極リースなど金額が変動する場合は単価を空欄のままにできます。
+          </p>
+          <p className="text-xs text-gray-500 mb-3">
+            回送費は、現場でその重機を初めて車両代に記録するときに自動入力されます。自走するトラックなど回送費がかからない車両は「0」を入れると入力を求められなくなります。
           </p>
           <div className="border border-gray-200 rounded-xl p-3 mb-3 bg-gray-50">
             <p className="text-sm font-medium mb-2">新規車両・重機を追加</p>
@@ -571,25 +741,50 @@ export default function MasterPage() {
               )}
               <div className="flex flex-col gap-1">
                 {vehicles.filter(v => v.category === cat).map(v => (
-                  <div key={v.id} className="flex justify-between items-center text-sm py-2 border-b last:border-0">
-                    <span>{v.name}</span>
-                    <div className="flex items-center gap-2">
-                      {editingVehiclePrice?.id === v.id ? (
-                        <div className="flex items-center gap-1">
-                          <input type="number" inputMode="decimal" step="0.01" className="border border-gray-200 rounded-xl px-2 py-1 text-sm w-24"
-                            value={editingVehiclePrice.price}
-                            onChange={e => setEditingVehiclePrice({ ...editingVehiclePrice, price: e.target.value })} />
-                          <span className="text-xs text-gray-500">円/{v.unit}</span>
-                          <button onClick={() => updateVehiclePrice(v.id, editingVehiclePrice.price)} className="text-blue-600 text-xs">✓</button>
-                          <button onClick={() => setEditingVehiclePrice(null)} className="text-gray-400 text-xs">✕</button>
-                        </div>
-                      ) : (
-                        <button onClick={() => setEditingVehiclePrice({ id: v.id, price: v.default_price ? String(v.default_price) : '' })}
-                          className="text-sm text-gray-700 hover:text-blue-600">
-                          {v.default_price ? `${v.default_price.toLocaleString()}円/${v.unit}` : '単価未設定'}
-                        </button>
-                      )}
+                  <div key={v.id} className="text-sm py-2 border-b last:border-0">
+                    <div className="flex justify-between items-center">
+                      {nameCell('vehicles', v.id, 'name', v.name)}
                       <button onClick={() => deleteVehicle(v.id)} className="text-gray-300 hover:text-red-400 text-xs">削除</button>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1">
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs text-gray-400">単価</span>
+                        {editingVehiclePrice?.id === v.id ? (
+                          <>
+                            <input type="number" inputMode="decimal" step="0.01" className="border border-gray-200 rounded-xl px-2 py-1 text-sm w-24"
+                              value={editingVehiclePrice.price}
+                              onChange={e => setEditingVehiclePrice({ ...editingVehiclePrice, price: e.target.value })} />
+                            <span className="text-xs text-gray-500">円/{v.unit}</span>
+                            <button onClick={() => updateVehiclePrice(v.id, editingVehiclePrice.price)} className="text-blue-600 text-xs">✓</button>
+                            <button onClick={() => setEditingVehiclePrice(null)} className="text-gray-400 text-xs">✕</button>
+                          </>
+                        ) : (
+                          <button onClick={() => setEditingVehiclePrice({ id: v.id, price: v.default_price ? String(v.default_price) : '' })}
+                            className="text-sm text-gray-700 hover:text-blue-600">
+                            {v.default_price ? `${v.default_price.toLocaleString()}円/${v.unit}` : '未設定'}
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs text-gray-400">回送費</span>
+                        {editingVehicleFee?.id === v.id ? (
+                          <>
+                            <input type="number" inputMode="decimal" step="0.01" className="border border-gray-200 rounded-xl px-2 py-1 text-sm w-24"
+                              value={editingVehicleFee.fee}
+                              onChange={e => setEditingVehicleFee({ ...editingVehicleFee, fee: e.target.value })} />
+                            <span className="text-xs text-gray-500">円</span>
+                            <button onClick={() => updateVehicleFee(v.id, editingVehicleFee.fee)} className="text-blue-600 text-xs">✓</button>
+                            <button onClick={() => setEditingVehicleFee(null)} className="text-gray-400 text-xs">✕</button>
+                          </>
+                        ) : (
+                          <button onClick={() => setEditingVehicleFee({ id: v.id, fee: v.default_mobilization_fee != null ? String(v.default_mobilization_fee) : '' })}
+                            className="text-sm text-gray-700 hover:text-blue-600">
+                            {v.default_mobilization_fee != null
+                              ? (v.default_mobilization_fee === 0 ? 'なし' : `${v.default_mobilization_fee.toLocaleString()}円`)
+                              : '未設定'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -639,7 +834,7 @@ export default function MasterPage() {
           <div className="flex flex-col gap-1">
             {scaffoldPrices.filter(p => p.category === 'usage').map(p => (
               <div key={p.id} className="flex justify-between items-center text-sm py-2 border-b last:border-0">
-                <span>{p.label}</span>
+                {nameCell('scaffold_material_prices', p.id, 'label', p.label)}
                 <div className="flex items-center gap-2">
                   {editingScaffoldPrice?.id === p.id ? (
                     <div className="flex items-center gap-1">

@@ -27,6 +27,7 @@ export type Project = {
   start_date: string
   end_date: string | null
   status: 'active' | 'completed'
+  deleted_at: string | null
   notes: string | null
   aerial_photo_url: string | null
   budget_waste_cost: number | null
@@ -68,6 +69,8 @@ export type Vehicle = {
   name: string
   category: 'rental' | 'owned'
   default_price: number | null
+  // 重機の回送費。空欄=登録なし（毎回手入力）、0=回送費なし
+  default_mobilization_fee?: number | null
   unit: string
   note: string | null
   created_at: string
@@ -252,4 +255,56 @@ export type CompanySettings = {
   license_no: string | null
   representative: string | null
   stamp_url: string | null
+}
+
+// 応援先（他社への人貸し先）
+export type SupportCompany = {
+  id: number
+  name: string
+  sort_order: number
+  active: boolean
+  created_at: string
+}
+
+// 翌日の段取り（1日1件）
+export type DispatchPlan = {
+  id: number
+  date: string
+  notified_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+// 段取りの行き先。自社現場なら project_id、応援なら support_company_id が入る
+export type DispatchGroup = {
+  id: number
+  plan_id: number
+  project_id: number | null
+  support_company_id: number | null
+  meet_time: string | null
+  meet_place: string | null
+  note: string | null
+  created_at: string
+}
+
+export type DispatchAssignment = {
+  id: number
+  plan_id: number
+  group_id: number
+  worker_id: number
+  created_at: string
+}
+
+// やること（タスク管理）
+export type Task = {
+  id: number
+  title: string
+  note: string | null
+  project_id: number | null
+  assignee_id: number | null
+  due_date: string | null
+  done_at: string | null
+  done_by: number | null
+  created_at: string
+  updated_at: string
 }

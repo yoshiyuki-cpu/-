@@ -39,7 +39,7 @@ export async function fetchUsageEvents(supabase: SupabaseClient) {
   const since = sinceDate.toISOString().split('T')[0]
 
   const [{ data: pj }, { data: wk }, { data: waste }, { data: labor }, { data: other }, { data: scrap }] = await Promise.all([
-    supabase.from('projects').select('id, name, status'),
+    supabase.from('projects').select('*'),
     supabase.from('workers').select('id, name'),
     supabase.from('waste_entries').select('project_id, date, waste_types(entry_type)').gte('date', since),
     supabase.from('labor_entries').select('project_id, date, worker_id').gte('date', since),
