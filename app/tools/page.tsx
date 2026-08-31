@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { supabase, Tool, ToolUsage } from '@/lib/supabase'
 import Link from 'next/link'
+import { jstToday } from '@/lib/date'
 
 type EditTarget = { id: number; name: string; total_quantity: string; broken_quantity: string; unit: string }
 
@@ -71,7 +72,7 @@ export default function ToolsPage() {
   }
 
   async function returnUsage(id: number) {
-    await supabase.from('tool_usages').update({ returned_at: new Date().toISOString().split('T')[0] }).eq('id', id)
+    await supabase.from('tool_usages').update({ returned_at: jstToday() }).eq('id', id)
     load()
   }
 

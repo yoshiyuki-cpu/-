@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase, CalendarEvent, CalendarEventType } from '@/lib/supabase'
+import { jstToday } from '@/lib/date'
 
 type Foreman = { id: number; name: string }
 
@@ -18,7 +19,6 @@ const TYPE_STYLES: Record<CalendarEventType, string> = {
   other: 'bg-gray-100 text-gray-600',
 }
 
-const today = new Date().toISOString().split('T')[0]
 
 function formatDate(d: string) {
   const [y, m, day] = d.split('-').map(Number)
@@ -34,7 +34,7 @@ export default function CalendarPage() {
   const [adding, setAdding] = useState(false)
   const [form, setForm] = useState({
     title: '', event_type: 'construction_start' as CalendarEventType,
-    event_date: today, note: '', notify_all: true,
+    event_date: jstToday(), note: '', notify_all: true,
   })
   const [formRecipientIds, setFormRecipientIds] = useState<number[]>([])
 
@@ -43,7 +43,7 @@ export default function CalendarPage() {
   async function load() {
     setLoading(true)
     const [{ data: ev }, { data: rc }, { data: fm }] = await Promise.all([
-      supabase.from('calendar_events').select('*').gte('event_date', today).order('event_date'),
+      supabase.from('calendar_events').select('*').gte('event_date', jstToday()).order('event_date'),
       supabase.from('calendar_event_recipients').select('event_id, worker_id'),
       supabase.from('workers').select('id, name').eq('is_foreman', true).order('name'),
     ])
@@ -74,7 +74,7 @@ export default function CalendarPage() {
       )
     }
 
-    setForm({ title: '', event_type: 'construction_start', event_date: today, note: '', notify_all: true })
+    setForm({ title: '', event_type: 'construction_start', event_date: jstToday(), note: '', notify_all: true })
     setFormRecipientIds([])
     setAdding(false)
     load()

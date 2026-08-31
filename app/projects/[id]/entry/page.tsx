@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { supabase, DisposalSite, WasteType, Vehicle, FuelPrice } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
+import { jstToday } from '@/lib/date'
 
 type Tab = 'waste' | 'labor' | 'fuel' | 'lease' | 'expense'
 type Worker = { id: number; name: string; company_name: string | null }
@@ -52,7 +53,7 @@ export default function EntryPage() {
   const [success, setSuccess] = useState(false)
   const [receiptError, setReceiptError] = useState<string | null>(null)
 
-  const today = new Date().toISOString().split('T')[0]
+  const today = jstToday()
   const [wasteForm, setWasteForm] = useState({ date: today, site_id: '', waste_type_id: '', quantity: '' })
   const [laborDate, setLaborDate] = useState(today)
   const [workerDayType, setWorkerDayType] = useState<Record<number, DayType>>({})

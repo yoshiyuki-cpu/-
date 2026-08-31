@@ -2,8 +2,8 @@
 import { useEffect, useState } from 'react'
 import { supabase, Tool, ToolUsage, Project } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
+import { jstToday } from '@/lib/date'
 
-const today = new Date().toISOString().split('T')[0]
 
 export default function ProjectToolsPage() {
   const { id } = useParams()
@@ -14,7 +14,7 @@ export default function ProjectToolsPage() {
   const [projectUsages, setProjectUsages] = useState<ToolUsage[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState({ tool_id: '', quantity: '1', checked_out_at: today, note: '' })
+  const [form, setForm] = useState({ tool_id: '', quantity: '1', checked_out_at: jstToday(), note: '' })
   const [showHistory, setShowHistory] = useState(false)
 
   useEffect(() => { load() }, [id])
@@ -56,12 +56,12 @@ export default function ProjectToolsPage() {
       note: form.note || null,
     })
     setSaving(false)
-    setForm({ tool_id: '', quantity: '1', checked_out_at: today, note: '' })
+    setForm({ tool_id: '', quantity: '1', checked_out_at: jstToday(), note: '' })
     load()
   }
 
   async function returnUsage(usageId: number) {
-    await supabase.from('tool_usages').update({ returned_at: today }).eq('id', usageId)
+    await supabase.from('tool_usages').update({ returned_at: jstToday() }).eq('id', usageId)
     load()
   }
 

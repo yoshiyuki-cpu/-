@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase, Estimate, EstimateItem, EstimateStatus, EstimateLayoutType } from '@/lib/supabase'
 import { calcEstimateTotals, UNIT_OPTIONS, ITEM_PRESETS, itemAmount, ESTIMATE_CATEGORIES, NOTE_MARKS, normalizeCategoryNotes } from '@/lib/estimateCalc'
+import { jstToday } from '@/lib/date'
 
 type ItemRow = { key: string; name: string; quantity: string; unit: string; unit_price: string; category: string | null }
 
@@ -28,7 +29,7 @@ function emptyForm() {
     assignee: '',
     tax_rate: '10',
     status: 'draft' as EstimateStatus,
-    issue_date: new Date().toISOString().slice(0, 10),
+    issue_date: jstToday(),
     valid_until: '',
     notes: '',
     layout_type: 'simple' as EstimateLayoutType,

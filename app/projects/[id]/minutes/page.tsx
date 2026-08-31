@@ -2,10 +2,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase, MeetingNote, MeetingNotePhoto } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
+import { jstToday } from '@/lib/date'
 
 type Mode = 'list' | 'new' | 'detail'
 
-const today = new Date().toISOString().split('T')[0]
 
 // スマホカメラの写真は数MB〜十数MBあり、そのままbase64送信するとモバイルブラウザがメモリ不足で
 // 落ちたりVercelのリクエストサイズ上限を超えたりするため、送信前に縮小・JPEG化する
@@ -43,7 +43,7 @@ export default function MinutesPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
-  const [form, setForm] = useState({ date: today, danger_points: '', cautions: '', notices: '' })
+  const [form, setForm] = useState({ date: jstToday(), danger_points: '', cautions: '', notices: '' })
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState({ danger_points: '', cautions: '', notices: '' })
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
@@ -249,7 +249,7 @@ export default function MinutesPage() {
     }
     setSaving(false)
     setSuccess(true)
-    setForm({ date: today, danger_points: '', cautions: '', notices: '' })
+    setForm({ date: jstToday(), danger_points: '', cautions: '', notices: '' })
     setPhotoUrl(null)
     setPhotoError(null)
     setVoiceText('')
