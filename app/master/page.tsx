@@ -37,6 +37,7 @@ export default function MasterPage() {
   const [testResult, setTestResult] = useState<{ id: number; text: string } | null>(null)
   const [newVehicle, setNewVehicle] = useState({ name: '', category: 'rental' as 'rental' | 'owned', default_price: '', unit: '日' })
   const [editingVehiclePrice, setEditingVehiclePrice] = useState<{ id: number; price: string } | null>(null)
+  const [editingVehicleFee, setEditingVehicleFee] = useState<{ id: number; fee: string } | null>(null)
   const [editingFuelPrice, setEditingFuelPrice] = useState<{ id: number; price: string } | null>(null)
   const [company, setCompany] = useState<CompanySettings | null>(null)
   const [savingCompany, setSavingCompany] = useState(false)
@@ -367,6 +368,20 @@ export default function MasterPage() {
     loadAll()
   }
 
+  async function updateVehicleFee(id: number, fee: string) {
+    // 「0」は「回送費なし」として登録したいので、空欄だけを未登録として扱う
+    const value = fee.trim() === '' ? null : Number(fee)
+    const { error } = await supabase.from('vehicles').update({ default_mobilization_fee: value }).eq('id', id)
+    if (error) {
+      alert(error.message.includes('default_mobilization_fee')
+        ? '回送費の準備がまだです。Supabaseで supabase-schema-vehicle-mobilization-fee.sql を実行してください。'
+        : '回送費を保存できませんでした。')
+      return
+    }
+    setEditingVehicleFee(null)
+    loadAll()
+  }
+
   async function deleteVehicle(id: number) {
     if (!confirm('この車両・重機を削除しますか？')) return
     const { error } = await supabase.from('vehicles').delete().eq('id', id)
@@ -690,6 +705,9 @@ export default function MasterPage() {
           <p className="text-xs text-gray-500 mb-3">
             単価を設定すると入力画面で自動入力されますが、その場での金額変更もできます。月極リースなど金額が変動する場合は単価を空欄のままにできます。
           </p>
+          <p className="text-xs text-gray-500 mb-3">
+            回送費は、現場でその重機を初めて車両代に記録するときに自動入力されます。自走するトラックなど回送費がかからない車両は「0」を入れると入力を求められなくなります。
+          </p>
           <div className="border border-gray-200 rounded-xl p-3 mb-3 bg-gray-50">
             <p className="text-sm font-medium mb-2">新規車両・重機を追加</p>
             <div className="flex flex-col gap-2">
@@ -723,25 +741,50 @@ export default function MasterPage() {
               )}
               <div className="flex flex-col gap-1">
                 {vehicles.filter(v => v.category === cat).map(v => (
-                  <div key={v.id} className="flex justify-between items-center text-sm py-2 border-b last:border-0">
-                    {nameCell('vehicles', v.id, 'name', v.name)}
-                    <div className="flex items-center gap-2">
-                      {editingVehiclePrice?.id === v.id ? (
-                        <div className="flex items-center gap-1">
-                          <input type="number" inputMode="decimal" step="0.01" className="border border-gray-200 rounded-xl px-2 py-1 text-sm w-24"
-                            value={editingVehiclePrice.price}
-                            onChange={e => setEditingVehiclePrice({ ...editingVehiclePrice, price: e.target.value })} />
-                          <span className="text-xs text-gray-500">円/{v.unit}</span>
-                          <button onClick={() => updateVehiclePrice(v.id, editingVehiclePrice.price)} className="text-blue-600 text-xs">✓</button>
-                          <button onClick={() => setEditingVehiclePrice(null)} className="text-gray-400 text-xs">✕</button>
-                        </div>
-                      ) : (
-                        <button onClick={() => setEditingVehiclePrice({ id: v.id, price: v.default_price ? String(v.default_price) : '' })}
-                          className="text-sm text-gray-700 hover:text-blue-600">
-                          {v.default_price ? `${v.default_price.toLocaleString()}円/${v.unit}` : '単価未設定'}
-                        </button>
-                      )}
+                  <div key={v.id} className="text-sm py-2 border-b last:border-0">
+                    <div className="flex justify-between items-center">
+                      {nameCell('vehicles', v.id, 'name', v.name)}
                       <button onClick={() => deleteVehicle(v.id)} className="text-gray-300 hover:text-red-400 text-xs">削除</button>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1">
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs text-gray-400">単価</span>
+                        {editingVehiclePrice?.id === v.id ? (
+                          <>
+                            <input type="number" inputMode="decimal" step="0.01" className="border border-gray-200 rounded-xl px-2 py-1 text-sm w-24"
+                              value={editingVehiclePrice.price}
+                              onChange={e => setEditingVehiclePrice({ ...editingVehiclePrice, price: e.target.value })} />
+                            <span className="text-xs text-gray-500">円/{v.unit}</span>
+                            <button onClick={() => updateVehiclePrice(v.id, editingVehiclePrice.price)} className="text-blue-600 text-xs">✓</button>
+                            <button onClick={() => setEditingVehiclePrice(null)} className="text-gray-400 text-xs">✕</button>
+                          </>
+                        ) : (
+                          <button onClick={() => setEditingVehiclePrice({ id: v.id, price: v.default_price ? String(v.default_price) : '' })}
+                            className="text-sm text-gray-700 hover:text-blue-600">
+                            {v.default_price ? `${v.default_price.toLocaleString()}円/${v.unit}` : '未設定'}
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs text-gray-400">回送費</span>
+                        {editingVehicleFee?.id === v.id ? (
+                          <>
+                            <input type="number" inputMode="decimal" step="0.01" className="border border-gray-200 rounded-xl px-2 py-1 text-sm w-24"
+                              value={editingVehicleFee.fee}
+                              onChange={e => setEditingVehicleFee({ ...editingVehicleFee, fee: e.target.value })} />
+                            <span className="text-xs text-gray-500">円</span>
+                            <button onClick={() => updateVehicleFee(v.id, editingVehicleFee.fee)} className="text-blue-600 text-xs">✓</button>
+                            <button onClick={() => setEditingVehicleFee(null)} className="text-gray-400 text-xs">✕</button>
+                          </>
+                        ) : (
+                          <button onClick={() => setEditingVehicleFee({ id: v.id, fee: v.default_mobilization_fee != null ? String(v.default_mobilization_fee) : '' })}
+                            className="text-sm text-gray-700 hover:text-blue-600">
+                            {v.default_mobilization_fee != null
+                              ? (v.default_mobilization_fee === 0 ? 'なし' : `${v.default_mobilization_fee.toLocaleString()}円`)
+                              : '未設定'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
