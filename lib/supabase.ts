@@ -69,6 +69,8 @@ export type Vehicle = {
   name: string
   category: 'rental' | 'owned'
   default_price: number | null
+  // 重機の回送費。空欄=登録なし（毎回手入力）、0=回送費なし
+  default_mobilization_fee?: number | null
   unit: string
   note: string | null
   created_at: string
