@@ -2,8 +2,10 @@
 import { useEffect, useState } from 'react'
 import { supabase, CalendarEvent, CalendarEventType } from '@/lib/supabase'
 import { jstToday } from '@/lib/date'
+import DailyCost from './DailyCost'
 
 type Foreman = { id: number; name: string }
+type Tab = 'plan' | 'cost'
 
 const TYPE_LABELS: Record<CalendarEventType, string> = {
   construction_start: '着工',
@@ -27,6 +29,7 @@ function formatDate(d: string) {
 }
 
 export default function CalendarPage() {
+  const [tab, setTab] = useState<Tab>('plan')
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [recipients, setRecipients] = useState<Record<number, number[]>>({})
   const [foremen, setForemen] = useState<Foreman[]>([])
@@ -105,6 +108,21 @@ export default function CalendarPage() {
     <div>
       <h1 className="text-xl font-bold mb-4">共有カレンダー</h1>
 
+      <div className="flex gap-2 mb-4">
+        <button onClick={() => setTab('plan')}
+          className={`flex-1 py-2 rounded-full text-sm font-medium transition ${tab === 'plan' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`}>
+          予定
+        </button>
+        <button onClick={() => setTab('cost')}
+          className={`flex-1 py-2 rounded-full text-sm font-medium transition ${tab === 'cost' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`}>
+          日別の費用
+        </button>
+      </div>
+
+      {tab === 'cost' && <DailyCost />}
+
+      {tab === 'plan' && (
+      <>
       <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-4">
         <h2 className="font-bold mb-3 text-gray-700">予定を追加</h2>
         <p className="text-xs text-gray-500 mb-3">登録した予定は、前日の夕方17:30に通知先へリマインドされます。</p>
@@ -181,6 +199,8 @@ export default function CalendarPage() {
           ))}
         </div>
       </section>
+      </>
+      )}
     </div>
   )
 }
