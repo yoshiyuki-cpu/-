@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { supabase, DisposalSite, WasteType, Vehicle, FuelPrice } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
+import { jstToday } from '@/lib/date'
 
 type Tab = 'waste' | 'labor' | 'fuel' | 'lease' | 'expense'
 type Worker = { id: number; name: string; company_name: string | null }
@@ -52,16 +53,39 @@ export default function EntryPage() {
   const [success, setSuccess] = useState(false)
   const [receiptError, setReceiptError] = useState<string | null>(null)
 
-  const today = new Date().toISOString().split('T')[0]
+  const today = jstToday()
   const [wasteForm, setWasteForm] = useState({ date: today, site_id: '', waste_type_id: '', quantity: '' })
   const [laborDate, setLaborDate] = useState(today)
   const [workerDayType, setWorkerDayType] = useState<Record<number, DayType>>({})
+  // この現場・この日にすでに入っている人工。二重登録を防ぐために使う
+  const [laborDone, setLaborDone] = useState<Record<number, DayType>>({})
   const [otherForm, setOtherForm] = useState({
     date: today, unit_price: '', note: '', quantity: '', fuel_type: '' as '' | '軽油' | 'レギュラー',
     vehicle_category: '' as '' | 'rental' | 'owned', vehicle_id: '', liter_price: '', mobilization_fee: '',
   })
 
   useEffect(() => { loadMaster() }, [])
+  useEffect(() => { loadLaborDone() }, [id, laborDate])
+
+  // 同じ現場・同じ日に人工を二度入れてしまう事故があったため、登録済みの人を先に読む
+  async function loadLaborDone() {
+    const { data } = await supabase.from('labor_entries')
+      .select('worker_id, day_type').eq('project_id', Number(id)).eq('date', laborDate)
+    const map: Record<number, DayType> = {}
+    ;(data ?? []).forEach((e: { worker_id: number; day_type: DayType }) => {
+      // 半日が2回入っている場合もあるので、最初に見つけた区分を出す
+      if (!(e.worker_id in map)) map[e.worker_id] = e.day_type ?? 'full'
+    })
+    setLaborDone(map)
+    // 日付を変えたときに、前の日付で選んでいた人が残らないようにする
+    setWorkerDayType(prev => {
+      const next: Record<number, DayType> = {}
+      for (const [wid, dt] of Object.entries(prev)) {
+        if (!(Number(wid) in map)) next[Number(wid)] = dt
+      }
+      return next
+    })
+  }
 
   async function loadMaster() {
     const [{ data: s }, { data: w }, { data: wk }, { data: v }, { data: le }, { data: fp }] = await Promise.all([
@@ -84,6 +108,7 @@ export default function EntryPage() {
   const selectedVehicle = vehicles.find(v => String(v.id) === otherForm.vehicle_id)
 
   function toggleWorker(workerId: number) {
+    if (workerId in laborDone) return
     setWorkerDayType(prev => {
       if (workerId in prev) {
         const { [workerId]: _removed, ...rest } = prev
@@ -123,9 +148,19 @@ export default function EntryPage() {
 
   async function saveLabor(e: React.FormEvent) {
     e.preventDefault()
-    const entries = Object.entries(workerDayType)
-    if (entries.length === 0) return
+    if (Object.keys(workerDayType).length === 0) return
     setSaving(true)
+    // 保存を押す直前にもう一度DBを見る。別の職長が同じ日を入れていた場合に重ねないため
+    const { data: latest } = await supabase.from('labor_entries')
+      .select('worker_id').eq('project_id', Number(id)).eq('date', laborDate)
+    const already = new Set((latest ?? []).map((e: { worker_id: number }) => e.worker_id))
+    const entries = Object.entries(workerDayType).filter(([workerId]) => !already.has(Number(workerId)))
+    if (entries.length === 0) {
+      setSaving(false)
+      setWorkerDayType({})
+      await loadLaborDone()
+      return
+    }
     await Promise.all(entries.map(([workerId, dayType]) =>
       supabase.from('labor_entries').insert({
         project_id: Number(id),
@@ -138,6 +173,7 @@ export default function EntryPage() {
     setSaving(false)
     setSuccess(true)
     setWorkerDayType({})
+    await loadLaborDone()
     setTimeout(() => setSuccess(false), 2000)
   }
 
@@ -260,19 +296,30 @@ export default function EntryPage() {
             {workers.length === 0 && (
               <p className="text-sm text-gray-400">マスタページで作業員を登録してください</p>
             )}
+            {Object.keys(laborDone).length > 0 && (
+              <p className="text-xs text-gray-500 mb-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                この日はすでに{Object.keys(laborDone).length}名分が登録されています。二重に付かないよう、その人は選べません。直すときは現場詳細の人工記録から。
+              </p>
+            )}
             <div className="flex flex-col gap-2">
               {workers.map(w => {
                 const dayType = workerDayType[w.id]
                 const selected = dayType !== undefined
+                const done = laborDone[w.id]
                 return (
-                  <div key={w.id} className={`rounded border p-3 ${selected ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
-                    <label className="flex items-center gap-3 cursor-pointer">
-                      <input type="checkbox" checked={selected}
+                  <div key={w.id} className={`rounded border p-3 ${done ? 'border-gray-200 bg-gray-50' : selected ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
+                    <label className={`flex items-center gap-3 ${done ? 'cursor-default' : 'cursor-pointer'}`}>
+                      <input type="checkbox" checked={selected} disabled={!!done}
                         onChange={() => toggleWorker(w.id)} className="w-4 h-4" />
-                      <span className="text-sm">
+                      <span className={`text-sm ${done ? 'text-gray-400' : ''}`}>
                         {w.name}
-                        {w.company_name && <span className="text-gray-500 ml-1">（{w.company_name}）</span>}
+                        {w.company_name && <span className={done ? 'ml-1' : 'text-gray-500 ml-1'}>（{w.company_name}）</span>}
                       </span>
+                      {done && (
+                        <span className="ml-auto text-xs bg-gray-200 text-gray-600 rounded-full px-2 py-0.5">
+                          登録済み{done === 'half' ? '（半日）' : ''}
+                        </span>
+                      )}
                     </label>
                     {selected && (
                       <div className="flex gap-2 mt-2 ml-7">

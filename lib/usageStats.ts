@@ -1,4 +1,5 @@
 import { SupabaseClient } from '@supabase/supabase-js'
+import { jstToday, jstDateOffset } from '@/lib/date'
 
 export type Cat = '廃材' | 'スクラップ' | '人工' | '燃料代' | '車両代' | '経費'
 export type Ev = { project_id: number; date: string; cat: Cat; worker_id?: number }
@@ -34,9 +35,7 @@ export function weekStart(d: Date) {
 }
 
 export async function fetchUsageEvents(supabase: SupabaseClient) {
-  const sinceDate = new Date()
-  sinceDate.setDate(sinceDate.getDate() - DAYS_WINDOW)
-  const since = sinceDate.toISOString().split('T')[0]
+  const since = jstDateOffset(-DAYS_WINDOW)
 
   const [{ data: pj }, { data: wk }, { data: waste }, { data: labor }, { data: other }, { data: scrap }] = await Promise.all([
     supabase.from('projects').select('*'),
@@ -105,7 +104,7 @@ export function computeUsageMetrics(events: Ev[], projects: ProjectRow[], worker
 
 export function toAiPayload(metrics: ReturnType<typeof computeUsageMetrics>) {
   return {
-    today: new Date().toISOString().split('T')[0],
+    today: jstToday(),
     summary: {
       recent30Count: metrics.recent.length,
       daysWithInput: metrics.recentDays,

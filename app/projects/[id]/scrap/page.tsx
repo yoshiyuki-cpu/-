@@ -2,8 +2,8 @@
 import { useEffect, useState, useRef } from 'react'
 import { supabase, ScrapRecord } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
+import { jstToday } from '@/lib/date'
 
-const today = new Date().toISOString().split('T')[0]
 
 type ScrapItem = { name: string; amount: number }
 
@@ -23,7 +23,7 @@ export default function ScrapPage() {
   const [deleting, setDeleting] = useState(false)
 
   // フォーム
-  const [date, setDate] = useState(today)
+  const [date, setDate] = useState(jstToday())
   const [items, setItems] = useState<ScrapItem[]>([])
   const [manualItem, setManualItem] = useState('')
   const [totalAmount, setTotalAmount] = useState('')
@@ -48,7 +48,7 @@ export default function ScrapPage() {
   }
 
   function resetForm() {
-    setDate(today)
+    setDate(jstToday())
     setItems([])
     setManualItem('')
     setTotalAmount('')

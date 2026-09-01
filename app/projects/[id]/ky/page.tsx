@@ -2,8 +2,8 @@
 import { useEffect, useState, useRef } from 'react'
 import { supabase, KyPhoto } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
+import { jstToday } from '@/lib/date'
 
-const today = new Date().toISOString().split('T')[0]
 
 export default function KyPage() {
   const { id } = useParams()
@@ -13,7 +13,7 @@ export default function KyPage() {
   const [photos, setPhotos] = useState<KyPhoto[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
-  const [uploadDate, setUploadDate] = useState(today)
+  const [uploadDate, setUploadDate] = useState(jstToday())
   const [enlarged, setEnlarged] = useState<KyPhoto | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<KyPhoto | null>(null)
   const [deleting, setDeleting] = useState(false)

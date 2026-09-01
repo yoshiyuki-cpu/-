@@ -48,7 +48,9 @@ export default function AttendancePage() {
   const attendanceMap: Record<number, Record<number, { site: string; dayType: 'full' | 'half' }[]>> = {}
   workers.forEach(w => { attendanceMap[w.id] = {} })
   entries.forEach(e => {
-    const day = new Date(e.date).getDate()
+    // new Date('2026-08-01') はUTC解釈なので、端末のタイムゾーンによって日がずれる。
+    // 日付の文字列をそのまま分解する
+    const day = Number(e.date.split('-')[2])
     if (!attendanceMap[e.worker_id]) return
     if (!attendanceMap[e.worker_id][day]) attendanceMap[e.worker_id][day] = []
     attendanceMap[e.worker_id][day].push({ site: e.projects?.name ?? '', dayType: e.day_type ?? 'full' })

@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from 'react'
 import { supabase, Project, WasteEntry, OtherEntry, DisposalSite, WasteType, Vehicle } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { jstToday } from '@/lib/date'
 
 type SortDir = 'asc' | 'desc'
 type DeleteTarget = { table: 'waste_entries' | 'other_entries' | 'labor_entries'; id: number; label: string }
@@ -179,7 +180,7 @@ export default function ProjectDetailPage() {
   async function toggleStatus() {
     if (!project) return
     const newStatus = project.status === 'active' ? 'completed' : 'active'
-    const end_date = newStatus === 'completed' ? new Date().toISOString().split('T')[0] : null
+    const end_date = newStatus === 'completed' ? jstToday() : null
     await supabase.from('projects').update({ status: newStatus, end_date }).eq('id', id)
     load()
   }

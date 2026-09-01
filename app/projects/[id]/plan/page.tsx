@@ -2,10 +2,10 @@
 import { useEffect, useState } from 'react'
 import { supabase, Project, WorkProcess, LaborTarget } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
+import { jstToday } from '@/lib/date'
 
 type Tab = 'budget' | 'process' | 'labor'
 
-const today = new Date().toISOString().split('T')[0]
 
 // 日付間の日数差
 function daysBetween(a: string, b: string) {
@@ -37,12 +37,12 @@ export default function PlanPage() {
   // 作業工程フォーム
   const [processNotes, setProcessNotes] = useState('')
   const [editingNotes, setEditingNotes] = useState(false)
-  const [processForm, setProcessForm] = useState({ name: '', start_date: today, end_date: today, notes: '' })
+  const [processForm, setProcessForm] = useState({ name: '', start_date: jstToday(), end_date: jstToday(), notes: '' })
   const [showProcessForm, setShowProcessForm] = useState(false)
   const [deleteProcessId, setDeleteProcessId] = useState<number | null>(null)
 
   // 目標人工数フォーム
-  const [laborForm, setLaborForm] = useState({ date: today, target_count: '' })
+  const [laborForm, setLaborForm] = useState({ date: jstToday(), target_count: '' })
 
   // 実績集計（現場全体）
   const [actuals, setActuals] = useState({ waste_cost: 0, labor: 0, fuel: 0, lease: 0, expense: 0, scrap: 0 })
@@ -146,7 +146,7 @@ export default function PlanPage() {
       end_date: processForm.end_date,
       notes: processForm.notes || null,
     })
-    setProcessForm({ name: '', start_date: today, end_date: today, notes: '' })
+    setProcessForm({ name: '', start_date: jstToday(), end_date: jstToday(), notes: '' })
     setShowProcessForm(false)
     setSaving(false)
     load()
@@ -167,7 +167,7 @@ export default function PlanPage() {
       date: laborForm.date,
       target_count: Number(laborForm.target_count),
     }, { onConflict: 'project_id,date' })
-    setLaborForm({ date: today, target_count: '' })
+    setLaborForm({ date: jstToday(), target_count: '' })
     setSaving(false)
     load()
   }
@@ -191,8 +191,8 @@ export default function PlanPage() {
   const totalLaborActual = Object.values(laborActuals).reduce((s, v) => s + v, 0)
 
   // ガントチャート用: 全工程の最早開始・最遅終了
-  const minDate = processes.length > 0 ? processes.reduce((m, p) => p.start_date < m ? p.start_date : m, processes[0].start_date) : today
-  const maxDate = processes.length > 0 ? processes.reduce((m, p) => p.end_date > m ? p.end_date : m, processes[0].end_date) : today
+  const minDate = processes.length > 0 ? processes.reduce((m, p) => p.start_date < m ? p.start_date : m, processes[0].start_date) : jstToday()
+  const maxDate = processes.length > 0 ? processes.reduce((m, p) => p.end_date > m ? p.end_date : m, processes[0].end_date) : jstToday()
   const totalDays = Math.max(daysBetween(minDate, maxDate) + 1, 1)
 
   return (
