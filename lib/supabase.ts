@@ -161,6 +161,16 @@ export type KyPhoto = {
   created_at: string
 }
 
+// 振り返り（今月の失敗の記録）。本人と管理者だけが画面で開ける
+export type FailureNote = {
+  id: number
+  worker_id: number | null
+  month: string
+  body: string
+  created_at: string
+  updated_at: string
+}
+
 // 管路図（埋設管の図面写真）。note は「水道」「ガス」などの自由入力
 export type PipeDiagram = {
   id: number

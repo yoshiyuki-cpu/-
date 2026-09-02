@@ -413,6 +413,7 @@ export default function MasterPage() {
           <Link href="/usage" className="text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">📊 利用状況</Link>
           <Link href="/tools" className="text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🧰 置き場道具管理</Link>
           <Link href="/notifications" className="text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🔔 通知設定</Link>
+          <Link href="/reflection" className="text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🔒 振り返り</Link>
         </div>
       </div>
 
