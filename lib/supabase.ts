@@ -161,11 +161,15 @@ export type KyPhoto = {
   created_at: string
 }
 
-// 振り返り（今月の失敗の記録）。本人と管理者だけが画面で開ける
+// 振り返り（良かったこと・悪かったこと）。本人と社長だけが画面で開ける。
+// テーブル名は failure_notes のまま（改名は過去の記録に触るので避けた）
 export type FailureNote = {
   id: number
   worker_id: number | null
   month: string
+  // 追加したばかりの列。SQL未実行の環境では入っていないので任意にしている
+  kind?: 'good' | 'bad'
+  date?: string | null
   body: string
   created_at: string
   updated_at: string
