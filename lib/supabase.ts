@@ -161,6 +161,16 @@ export type KyPhoto = {
   created_at: string
 }
 
+// 管路図（埋設管の図面写真）。note は「水道」「ガス」などの自由入力
+export type PipeDiagram = {
+  id: number
+  project_id: number
+  date: string
+  photo_url: string
+  note: string | null
+  created_at: string
+}
+
 export type EstimateStatus = 'draft' | 'sent' | 'accepted' | 'rejected'
 
 export type EstimateLayoutType = 'simple' | 'detailed'
