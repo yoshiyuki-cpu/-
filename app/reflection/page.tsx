@@ -6,6 +6,22 @@ import { hashPasscode, workerScope, ADMIN_SCOPE, ADMIN_PASSCODE_KEY } from '@/li
 
 type Worker = { id: number; name: string; note_passcode_hash?: string | null }
 type Mode = { kind: 'worker'; worker: Worker } | { kind: 'admin' }
+// 入口で最初に選ぶ役割。null = まだ選んでいない
+type Role = null | 'worker' | 'admin'
+
+// 一度開いた端末では次から合言葉を聞かない。合言葉そのものは持たずハッシュを控え、
+// 開くときにDBの値と一致するか見る（社長がリセットしたら自動的に効かなくなる）
+const REMEMBER_KEY = 'reflection_unlock'
+
+function remember(v: unknown) {
+  try { localStorage.setItem(REMEMBER_KEY, JSON.stringify(v)) } catch { /* 使えない端末は毎回入力 */ }
+}
+function recall(): { kind: 'worker'; workerId: number; hash: string } | { kind: 'admin'; hash: string } | null {
+  try { return JSON.parse(localStorage.getItem(REMEMBER_KEY) || 'null') } catch { return null }
+}
+function forget() {
+  try { localStorage.removeItem(REMEMBER_KEY) } catch { /* 何もしない */ }
+}
 
 const thisMonth = () => jstToday().slice(0, 7)
 
@@ -26,20 +42,19 @@ export default function ReflectionPage() {
   const [needsSetup, setNeedsSetup] = useState(false)
   const [adminHash, setAdminHash] = useState<string | null>(null)
 
-  // 入口
+  const [role, setRole] = useState<Role>(null)
   const [pickedId, setPickedId] = useState('')
   const [passcode, setPasscode] = useState('')
-  const [newPasscode, setNewPasscode] = useState('')
   const [gateError, setGateError] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
 
-  // 開いた後
   const [mode, setMode] = useState<Mode | null>(null)
   const [month, setMonth] = useState(thisMonth())
   const [notes, setNotes] = useState<FailureNote[]>([])
   const [body, setBody] = useState('')
   const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState<{ id: number; body: string } | null>(null)
+  const [resetting, setResetting] = useState(false)
 
   useEffect(() => { loadMaster() }, [])
   useEffect(() => { if (mode) loadNotes() }, [mode, month])
@@ -52,8 +67,18 @@ export default function ReflectionPage() {
     ])
     // 列やテーブルがまだ無い環境では、壊れた見た目ではなく次にやる事を出す
     if (wkErr) setNeedsSetup(true)
-    setForemen(wk ?? [])
-    setAdminHash((st ?? [])[0]?.value ?? null)
+    const list = wk ?? []
+    const admin = (st ?? [])[0]?.value ?? null
+    setForemen(list)
+    setAdminHash(admin)
+
+    // この端末で一度開いていれば、そのまま開く
+    const saved = recall()
+    if (saved?.kind === 'admin' && admin && saved.hash === admin) setMode({ kind: 'admin' })
+    if (saved?.kind === 'worker') {
+      const w = list.find(f => f.id === saved.workerId)
+      if (w && w.note_passcode_hash && w.note_passcode_hash === saved.hash) setMode({ kind: 'worker', worker: w })
+    }
     setLoading(false)
   }
 
@@ -65,16 +90,15 @@ export default function ReflectionPage() {
     setNotes(data ?? [])
   }
 
-  // --- 入口の処理 ---
+  // --- 入口 ---
   async function enterAsWorker() {
     const w = foremen.find(f => String(f.id) === pickedId)
     if (!w) return
     setChecking(true)
     setGateError(null)
     if (!w.note_passcode_hash) {
-      // 初回。その職長が自分で合言葉を決める
-      if (newPasscode.length < 4) { setGateError('合言葉は4文字以上にしてください。'); setChecking(false); return }
-      const hash = await hashPasscode(workerScope(w.id), newPasscode)
+      if (passcode.length < 4) { setGateError('合言葉は4文字以上にしてください。'); setChecking(false); return }
+      const hash = await hashPasscode(workerScope(w.id), passcode)
       const { error } = await supabase.from('workers').update({ note_passcode_hash: hash }).eq('id', w.id)
       if (error) {
         setGateError(error.message.includes('note_passcode_hash')
@@ -82,21 +106,23 @@ export default function ReflectionPage() {
           : '合言葉を保存できませんでした。')
         setChecking(false); return
       }
+      remember({ kind: 'worker', workerId: w.id, hash })
       setMode({ kind: 'worker', worker: { ...w, note_passcode_hash: hash } })
     } else {
       const hash = await hashPasscode(workerScope(w.id), passcode)
       if (hash !== w.note_passcode_hash) { setGateError('合言葉が違います。'); setChecking(false); return }
+      remember({ kind: 'worker', workerId: w.id, hash })
       setMode({ kind: 'worker', worker: w })
     }
-    setPasscode(''); setNewPasscode(''); setChecking(false)
+    setPasscode(''); setChecking(false)
   }
 
   async function enterAsAdmin() {
     setChecking(true)
     setGateError(null)
     if (!adminHash) {
-      if (newPasscode.length < 4) { setGateError('合言葉は4文字以上にしてください。'); setChecking(false); return }
-      const hash = await hashPasscode(ADMIN_SCOPE, newPasscode)
+      if (passcode.length < 4) { setGateError('合言葉は4文字以上にしてください。'); setChecking(false); return }
+      const hash = await hashPasscode(ADMIN_SCOPE, passcode)
       const { error } = await supabase.from('app_settings')
         .upsert({ key: ADMIN_PASSCODE_KEY, value: hash, updated_at: new Date().toISOString() })
       if (error) {
@@ -104,13 +130,20 @@ export default function ReflectionPage() {
         setChecking(false); return
       }
       setAdminHash(hash)
+      remember({ kind: 'admin', hash })
       setMode({ kind: 'admin' })
     } else {
       const hash = await hashPasscode(ADMIN_SCOPE, passcode)
       if (hash !== adminHash) { setGateError('合言葉が違います。'); setChecking(false); return }
+      remember({ kind: 'admin', hash })
       setMode({ kind: 'admin' })
     }
-    setPasscode(''); setNewPasscode(''); setChecking(false)
+    setPasscode(''); setChecking(false)
+  }
+
+  function close() {
+    forget()
+    setMode(null); setNotes([]); setRole(null); setPickedId(''); setPasscode(''); setGateError(null)
   }
 
   // --- 記入 ---
@@ -141,8 +174,19 @@ export default function ReflectionPage() {
     await loadNotes()
   }
 
+  // 合言葉を忘れた職長のために、社長が消して決め直させる
+  async function resetWorkerPasscode(w: Worker) {
+    if (!confirm(`${w.name}さんの合言葉を消しますか？\n次に開くとき、本人が新しい合言葉を決め直します。書いた記録は消えません。`)) return
+    setResetting(true)
+    const { error } = await supabase.from('workers').update({ note_passcode_hash: null }).eq('id', w.id)
+    setResetting(false)
+    if (error) { alert('リセットできませんでした。'); return }
+    setForemen(fs => fs.map(f => f.id === w.id ? { ...f, note_passcode_hash: null } : f))
+  }
+
   const nameOf = (id: number | null) => foremen.find(f => f.id === id)?.name ?? '（不明）'
   const picked = foremen.find(f => String(f.id) === pickedId)
+  const isFirstTime = role === 'worker' ? (picked ? !picked.note_passcode_hash : false) : !adminHash
 
   if (loading) return <p className="text-center py-10 text-gray-500">読み込み中...</p>
 
@@ -152,7 +196,7 @@ export default function ReflectionPage() {
       <div>
         <h1 className="text-xl font-bold mb-1">振り返り</h1>
         <p className="text-xs text-gray-500 mb-4">
-          今月うまくいかなかった事を書き残す場所です。書いた本人と管理者だけが開けます。
+          今月うまくいかなかった事を書き残す場所です。書いた本人と社長だけが開けます。
         </p>
 
         {needsSetup && (
@@ -164,58 +208,68 @@ export default function ReflectionPage() {
           </div>
         )}
 
-        <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-4">
-          <h2 className="font-bold text-gray-700 mb-3">職長の方</h2>
-          <select className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base mb-2"
-            value={pickedId} onChange={e => { setPickedId(e.target.value); setGateError(null) }}>
-            <option value="">名前を選んでください</option>
-            {foremen.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-          </select>
+        {/* まずどちらか選ぶ。合言葉の欄を2つ同時に出さない */}
+        {role === null && (
+          <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+            <p className="text-sm font-medium mb-3">どちらですか？</p>
+            <div className="flex flex-col gap-2">
+              <button onClick={() => { setRole('worker'); setGateError(null) }}
+                className="w-full bg-blue-600 text-white py-3 rounded-xl font-medium">
+                職長（自分の失敗を書く）
+              </button>
+              <button onClick={() => { setRole('admin'); setGateError(null) }}
+                className="w-full border border-blue-600 text-blue-600 py-3 rounded-xl font-medium">
+                社長（全員分を読む）
+              </button>
+            </div>
+          </section>
+        )}
 
-          {picked && !picked.note_passcode_hash && (
-            <>
-              <p className="text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 mb-2">
-                初めてです。自分の合言葉を決めてください。次回からこの合言葉で開きます。
-              </p>
-              <input type="password" autoComplete="off" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base mb-2"
-                value={newPasscode} onChange={e => setNewPasscode(e.target.value)} placeholder="決める合言葉（4文字以上）" />
-            </>
-          )}
-          {picked && picked.note_passcode_hash && (
-            <input type="password" autoComplete="off" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base mb-2"
-              value={passcode} onChange={e => setPasscode(e.target.value)} placeholder="合言葉" />
-          )}
+        {role !== null && (
+          <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+            <div className="flex justify-between items-center mb-3">
+              <h2 className="font-bold text-gray-700">{role === 'worker' ? '職長' : '社長'}</h2>
+              <button onClick={() => { setRole(null); setPickedId(''); setPasscode(''); setGateError(null) }}
+                className="text-xs text-gray-500">選び直す</button>
+            </div>
 
-          <button onClick={enterAsWorker} disabled={!picked || checking}
-            className="w-full bg-blue-600 text-white py-3 rounded-xl font-medium disabled:opacity-40">
-            {checking ? '確認中...' : picked && !picked.note_passcode_hash ? '合言葉を決めて開く' : '開く'}
-          </button>
-        </section>
+            {role === 'worker' && (
+              <select className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base mb-2"
+                value={pickedId} onChange={e => { setPickedId(e.target.value); setPasscode(''); setGateError(null) }}>
+                <option value="">名前を選んでください</option>
+                {foremen.map(f => (
+                  <option key={f.id} value={f.id}>{f.name}{f.note_passcode_hash ? '' : '（はじめて）'}</option>
+                ))}
+              </select>
+            )}
 
-        <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-4">
-          <h2 className="font-bold text-gray-700 mb-3">管理者</h2>
-          {!adminHash && (
-            <>
-              <p className="text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 mb-2">
-                管理者の合言葉がまだ決まっていません。ここで決めてください。忘れると全員分が見られなくなります。
-              </p>
-              <input type="password" autoComplete="off" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base mb-2"
-                value={newPasscode} onChange={e => setNewPasscode(e.target.value)} placeholder="決める合言葉（4文字以上）" />
-            </>
-          )}
-          {adminHash && (
-            <input type="password" autoComplete="off" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base mb-2"
-              value={passcode} onChange={e => setPasscode(e.target.value)} placeholder="管理者の合言葉" />
-          )}
-          <button onClick={enterAsAdmin} disabled={checking}
-            className="w-full border border-blue-600 text-blue-600 py-3 rounded-xl font-medium disabled:opacity-40">
-            {adminHash ? '全員分を見る' : '合言葉を決める'}
-          </button>
-        </section>
+            {(role === 'admin' || picked) && (
+              <>
+                {isFirstTime && (
+                  <p className="text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 mb-2">
+                    はじめてなので、合言葉を決めてください。<span className="font-bold">決めるのはこの1回だけです。</span>
+                    {role === 'admin' && '忘れると全員分が読めなくなります。'}
+                  </p>
+                )}
+                <input type="password" autoComplete="off"
+                  className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base mb-2"
+                  value={passcode} onChange={e => setPasscode(e.target.value)}
+                  placeholder={isFirstTime ? '決める合言葉（4文字以上）' : '合言葉'} />
+                <button onClick={role === 'worker' ? enterAsWorker : enterAsAdmin} disabled={checking || !passcode}
+                  className="w-full bg-blue-600 text-white py-3 rounded-xl font-medium disabled:opacity-40">
+                  {checking ? '確認中...' : isFirstTime ? '合言葉を決めて開く' : '開く'}
+                </button>
+                <p className="text-[11px] text-gray-400 mt-2">
+                  この端末では、次からこの画面を出しません（毎回打つ必要はありません）。
+                </p>
+              </>
+            )}
 
-        {gateError && <p className="text-sm text-red-600 mb-3">{gateError}</p>}
+            {gateError && <p className="text-sm text-red-600 mt-3">{gateError}</p>}
+          </section>
+        )}
 
-        <p className="text-[11px] text-gray-400 leading-relaxed">
+        <p className="text-[11px] text-gray-400 leading-relaxed mt-4">
           この合言葉はアプリの画面を隠すためのものです。書いた内容そのものは暗号化していないので、
           データベースを直接見られる相手には読めます。人に知られたら困る事は書かないでください。
         </p>
@@ -228,11 +282,13 @@ export default function ReflectionPage() {
     <div>
       <div className="flex justify-between items-start mb-1">
         <h1 className="text-xl font-bold">振り返り</h1>
-        <button onClick={() => { setMode(null); setNotes([]); setPickedId('') }}
+        <button onClick={close}
           className="text-xs text-gray-500 border border-gray-200 rounded-full px-3 py-1.5">閉じる</button>
       </div>
       <p className="text-xs text-gray-500 mb-4">
-        {mode.kind === 'admin' ? '管理者として全員分を見ています。' : `${mode.worker.name}さんの記録です。他の職長には見えません。`}
+        {mode.kind === 'admin' ? '社長として全員分を見ています。' : `${mode.worker.name}さんの記録です。他の職長には見えません。`}
+        <br />
+        <span className="text-gray-400">「閉じる」を押すと、次からまた合言葉を聞きます。</span>
       </p>
 
       <div className="flex items-center justify-between bg-white rounded-2xl border border-gray-100 shadow-sm p-3 mb-4">
@@ -295,6 +351,31 @@ export default function ReflectionPage() {
           </div>
         ))}
       </div>
+
+      {/* 合言葉を忘れた職長の面倒を社長が見られるようにする */}
+      {mode.kind === 'admin' && (
+        <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mt-4">
+          <h2 className="font-bold text-gray-700 text-sm mb-1">職長の合言葉</h2>
+          <p className="text-xs text-gray-500 mb-3">
+            忘れた人がいたら消してください。次に開くとき本人が決め直します。書いた記録は消えません。
+          </p>
+          <div className="flex flex-col gap-1">
+            {foremen.map(f => (
+              <div key={f.id} className="flex justify-between items-center text-sm py-2 border-b last:border-0">
+                <span>{f.name}</span>
+                {f.note_passcode_hash ? (
+                  <button onClick={() => resetWorkerPasscode(f)} disabled={resetting}
+                    className="text-xs text-blue-600 border border-gray-200 rounded-full px-3 py-1 disabled:opacity-40">
+                    合言葉を消す
+                  </button>
+                ) : (
+                  <span className="text-xs text-gray-400">未設定</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   )
 }
