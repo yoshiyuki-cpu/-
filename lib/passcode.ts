@@ -14,3 +14,6 @@ export const workerScope = (workerId: number) => `worker-${workerId}`
 export const ADMIN_SCOPE = 'admin'
 
 export const ADMIN_PASSCODE_KEY = 'failure_notes_admin_passcode_hash'
+
+// 振り返りに記入があったときの通知先（社長のメールアドレス）
+export const REFLECTION_NOTIFY_EMAIL_KEY = 'reflection_notify_email'

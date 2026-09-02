@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { supabase, FailureNote } from '@/lib/supabase'
 import { jstToday } from '@/lib/date'
-import { hashPasscode, workerScope, ADMIN_SCOPE, ADMIN_PASSCODE_KEY } from '@/lib/passcode'
+import { hashPasscode, workerScope, ADMIN_SCOPE, ADMIN_PASSCODE_KEY, REFLECTION_NOTIFY_EMAIL_KEY } from '@/lib/passcode'
 
 type Worker = { id: number; name: string; note_passcode_hash?: string | null }
 type Mode = { kind: 'worker'; worker: Worker } | { kind: 'admin' }
@@ -30,6 +30,12 @@ function monthLabel(m: string) {
   return `${y}年${Number(mm)}月`
 }
 
+function dateLabel(d: string) {
+  const [y, m, day] = d.split('-').map(Number)
+  const w = ['日', '月', '火', '水', '木', '金', '土'][new Date(y, m - 1, day).getDay()]
+  return `${m}/${day}（${w}）`
+}
+
 function shiftMonth(m: string, diff: number) {
   const [y, mm] = m.split('-').map(Number)
   const d = new Date(y, mm - 1 + diff, 1)
@@ -51,10 +57,16 @@ export default function ReflectionPage() {
   const [mode, setMode] = useState<Mode | null>(null)
   const [month, setMonth] = useState(thisMonth())
   const [notes, setNotes] = useState<FailureNote[]>([])
-  const [body, setBody] = useState('')
+  // その日の「良かったこと」「悪かったこと」を両方まとめて書けるようにする
+  const [entryDate, setEntryDate] = useState(jstToday())
+  const [goodBody, setGoodBody] = useState('')
+  const [badBody, setBadBody] = useState('')
   const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
   const [editing, setEditing] = useState<{ id: number; body: string } | null>(null)
   const [resetting, setResetting] = useState(false)
+  const [notifyEmail, setNotifyEmail] = useState('')
+  const [notifySaved, setNotifySaved] = useState(false)
 
   useEffect(() => { loadMaster() }, [])
   useEffect(() => { if (mode) loadNotes() }, [mode, month])
@@ -63,12 +75,15 @@ export default function ReflectionPage() {
     setLoading(true)
     const [{ data: wk, error: wkErr }, { data: st }] = await Promise.all([
       supabase.from('workers').select('id, name, note_passcode_hash').eq('is_foreman', true).order('name'),
-      supabase.from('app_settings').select('key, value').eq('key', ADMIN_PASSCODE_KEY),
+      // 設定はまとめて取り、JS側で振り分ける
+      supabase.from('app_settings').select('key, value'),
     ])
     // 列やテーブルがまだ無い環境では、壊れた見た目ではなく次にやる事を出す
     if (wkErr) setNeedsSetup(true)
     const list = wk ?? []
-    const admin = (st ?? [])[0]?.value ?? null
+    const settings = (st ?? []) as { key: string; value: string | null }[]
+    const admin = settings.find(s => s.key === ADMIN_PASSCODE_KEY)?.value ?? null
+    setNotifyEmail(settings.find(s => s.key === REFLECTION_NOTIFY_EMAIL_KEY)?.value ?? '')
     setForemen(list)
     setAdminHash(admin)
 
@@ -84,11 +99,22 @@ export default function ReflectionPage() {
 
   async function loadNotes() {
     if (!mode) return
+    // kind と date は追加したばかりの列なので、DB側で絞ったり並べたりしない。
+    // SQL未実行の環境ではクエリごと失敗して一覧が空になるため
     let q = supabase.from('failure_notes').select('*').eq('month', month)
     if (mode.kind === 'worker') q = q.eq('worker_id', mode.worker.id)
     const { data } = await q.order('created_at', { ascending: false })
     setNotes(data ?? [])
   }
+
+  // 日付ごとにまとめる。日付が入っていない古い記録は月初として扱う
+  const dayOf = (n: FailureNote) => n.date || `${n.month}-01`
+  const byDate = notes.reduce<Record<string, FailureNote[]>>((acc, n) => {
+    const d = dayOf(n)
+    acc[d] = [...(acc[d] ?? []), n]
+    return acc
+  }, {})
+  const dates = Object.keys(byDate).sort().reverse()
 
   // --- 入口 ---
   async function enterAsWorker() {
@@ -148,15 +174,58 @@ export default function ReflectionPage() {
 
   // --- 記入 ---
   async function save() {
-    if (mode?.kind !== 'worker' || !body.trim()) return
+    if (mode?.kind !== 'worker') return
+    const good = goodBody.trim()
+    const bad = badBody.trim()
+    if (!good && !bad) return
     setSaving(true)
-    const { error } = await supabase.from('failure_notes').insert({
-      worker_id: mode.worker.id, month, body: body.trim(),
-    })
+
+    const rows = [
+      ...(good ? [{ kind: 'good', body: good }] : []),
+      ...(bad ? [{ kind: 'bad', body: bad }] : []),
+    ].map(r => ({
+      worker_id: mode.worker.id,
+      // 月は日付から作る。カレンダーの月移動と食い違わないようにするため
+      month: entryDate.slice(0, 7),
+      date: entryDate,
+      kind: r.kind,
+      body: r.body,
+    }))
+
+    const { error } = await supabase.from('failure_notes').insert(rows)
+    if (error) {
+      setSaving(false)
+      alert(error.message.includes('kind') || error.message.includes('date')
+        ? '良い・悪いの記録の準備がまだです。Supabaseで supabase-schema-reflection-good-bad.sql を実行してください。'
+        : '保存できませんでした。')
+      return
+    }
+
+    // 社長への通知。届かなくても記入は成功しているので、失敗させない
+    for (const r of rows) {
+      try {
+        await fetch('/api/reflection-notify', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workerName: mode.worker.name, kind: r.kind, date: entryDate }),
+        })
+      } catch { /* 通知が飛ばなくても記入は残る */ }
+    }
+
     setSaving(false)
-    if (error) { alert('保存できませんでした。'); return }
-    setBody('')
-    await loadNotes()
+    setGoodBody(''); setBadBody('')
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2500)
+    // 書いた日の月を見ていない場合は、その月に移して確認できるようにする
+    if (entryDate.slice(0, 7) !== month) setMonth(entryDate.slice(0, 7))
+    else await loadNotes()
+  }
+
+  async function saveNotifyEmail() {
+    const { error } = await supabase.from('app_settings')
+      .upsert({ key: REFLECTION_NOTIFY_EMAIL_KEY, value: notifyEmail.trim() || null, updated_at: new Date().toISOString() })
+    if (error) { alert('通知先を保存できませんでした。'); return }
+    setNotifySaved(true)
+    setTimeout(() => setNotifySaved(false), 2500)
   }
 
   async function saveEdit() {
@@ -299,14 +368,34 @@ export default function ReflectionPage() {
           className="px-3 py-1.5 text-sm text-gray-600 border border-gray-200 rounded-lg disabled:opacity-30">翌月 →</button>
       </div>
 
-      {mode.kind === 'worker' && month === thisMonth() && (
+      {mode.kind === 'worker' && (
         <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-4">
-          <label className="block text-sm font-medium mb-1">うまくいかなかった事</label>
-          <textarea className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base resize-none" rows={4}
-            value={body} onChange={e => setBody(e.target.value)}
-            placeholder="例：段取りの連絡が遅れて、朝に人が足りなかった" />
-          <button onClick={save} disabled={saving || !body.trim()}
-            className="w-full bg-blue-600 text-white py-3 rounded-xl font-medium disabled:opacity-40 mt-2">
+          {saved && (
+            <div className="bg-green-100 text-green-700 rounded-lg px-3 py-2 text-sm mb-3">
+              記録しました ✓　社長に知らせました
+            </div>
+          )}
+          <div className="mb-3">
+            <label className="block text-sm font-medium mb-1">どの日のこと</label>
+            <input type="date" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base"
+              value={entryDate} max={jstToday()} onChange={e => setEntryDate(e.target.value)} />
+            <p className="text-xs text-gray-400 mt-1">前の日の分も書けます</p>
+          </div>
+          <div className="mb-3">
+            <label className="block text-sm font-medium mb-1 text-blue-700">良かったこと</label>
+            <textarea className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base resize-none" rows={3}
+              value={goodBody} onChange={e => setGoodBody(e.target.value)}
+              placeholder="例：新人に先に段取りを説明したら、朝の動きが早くなった" />
+          </div>
+          <div className="mb-1">
+            <label className="block text-sm font-medium mb-1 text-red-700">悪かったこと</label>
+            <textarea className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base resize-none" rows={3}
+              value={badBody} onChange={e => setBadBody(e.target.value)}
+              placeholder="例：段取りの連絡が遅れて、朝に人が足りなかった" />
+          </div>
+          <p className="text-xs text-gray-400 mb-2">片方だけでも記録できます</p>
+          <button onClick={save} disabled={saving || (!goodBody.trim() && !badBody.trim())}
+            className="w-full bg-blue-600 text-white py-3 rounded-xl font-medium disabled:opacity-40">
             {saving ? '保存中...' : '記録する'}
           </button>
         </section>
@@ -316,41 +405,76 @@ export default function ReflectionPage() {
         <p className="text-gray-400 text-center py-10 text-sm">{monthLabel(month)}の記録はありません。</p>
       )}
 
-      <div className="flex flex-col gap-2">
-        {notes.map(n => (
-          <div key={n.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-            {mode.kind === 'admin' && (
-              <p className="text-xs font-semibold text-blue-700 mb-1">{nameOf(n.worker_id)}</p>
-            )}
-            {editing?.id === n.id ? (
-              <>
-                <textarea className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm resize-none" rows={4}
-                  value={editing.body} onChange={e => setEditing({ ...editing, body: e.target.value })} />
-                <div className="flex gap-2 mt-2">
-                  <button onClick={() => setEditing(null)}
-                    className="flex-1 py-1.5 border border-gray-200 rounded-xl text-sm text-gray-600">キャンセル</button>
-                  <button onClick={saveEdit}
-                    className="flex-1 py-1.5 bg-blue-600 text-white rounded-lg text-sm">保存</button>
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="text-sm text-gray-700 whitespace-pre-wrap">{n.body}</p>
-                <div className="flex items-center gap-3 mt-2">
-                  <span className="text-[11px] text-gray-400">{n.created_at.slice(0, 10)}</span>
-                  {mode.kind === 'worker' && (
-                    <>
-                      <button onClick={() => setEditing({ id: n.id, body: n.body })}
-                        className="text-xs text-blue-600 ml-auto">編集</button>
-                      <button onClick={() => remove(n)} className="text-xs text-gray-300 hover:text-red-400">削除</button>
-                    </>
-                  )}
-                </div>
-              </>
-            )}
+      {/* 日付ごとにまとめて、その日その日を振り返れるようにする */}
+      <div className="flex flex-col gap-4">
+        {dates.map(d => (
+          <div key={d}>
+            <p className="text-xs font-semibold text-gray-500 mb-1.5">{dateLabel(d)}</p>
+            <div className="flex flex-col gap-2">
+              {[...byDate[d]].sort((a, b) => (a.kind === 'good' ? -1 : 1) - (b.kind === 'good' ? -1 : 1)).map(n => {
+                const isGood = n.kind === 'good'
+                return (
+                  <div key={n.id} className={`bg-white rounded-2xl border shadow-sm p-4 ${isGood ? 'border-blue-100' : 'border-red-100'}`}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${isGood ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}`}>
+                        {isGood ? '良かったこと' : '悪かったこと'}
+                      </span>
+                      {mode.kind === 'admin' && (
+                        <span className="text-xs font-semibold text-gray-600">{nameOf(n.worker_id)}</span>
+                      )}
+                    </div>
+                    {editing?.id === n.id ? (
+                      <>
+                        <textarea className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm resize-none" rows={4}
+                          value={editing.body} onChange={e => setEditing({ ...editing, body: e.target.value })} />
+                        <div className="flex gap-2 mt-2">
+                          <button onClick={() => setEditing(null)}
+                            className="flex-1 py-1.5 border border-gray-200 rounded-xl text-sm text-gray-600">キャンセル</button>
+                          <button onClick={saveEdit}
+                            className="flex-1 py-1.5 bg-blue-600 text-white rounded-lg text-sm">保存</button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-sm text-gray-700 whitespace-pre-wrap">{n.body}</p>
+                        {mode.kind === 'worker' && (
+                          <div className="flex items-center gap-3 mt-2">
+                            <button onClick={() => setEditing({ id: n.id, body: n.body })}
+                              className="text-xs text-blue-600 ml-auto">編集</button>
+                            <button onClick={() => remove(n)} className="text-xs text-gray-300 hover:text-red-400">削除</button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           </div>
         ))}
       </div>
+
+      {/* 記入があったときの通知先 */}
+      {mode.kind === 'admin' && (
+        <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mt-4">
+          <h2 className="font-bold text-gray-700 text-sm mb-1">記入があったときの通知先</h2>
+          <p className="text-xs text-gray-500 mb-2">
+            職長が記入するとこのメールアドレスに届きます。誰がいつ書いたかだけを送り、
+            中身は載せません（メールのプレビューに出ないようにするため）。空欄にすると通知しません。
+          </p>
+          {notifySaved && (
+            <div className="bg-green-100 text-green-700 rounded-lg px-3 py-2 text-sm mb-2">保存しました ✓</div>
+          )}
+          <input type="email" inputMode="email" autoComplete="off"
+            className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base mb-2"
+            value={notifyEmail} onChange={e => setNotifyEmail(e.target.value)}
+            placeholder="社長のメールアドレス" />
+          <button onClick={saveNotifyEmail}
+            className="w-full bg-blue-600 text-white py-2.5 rounded-xl font-medium text-sm">
+            通知先を保存
+          </button>
+        </section>
+      )}
 
       {/* 合言葉を忘れた職長の面倒を社長が見られるようにする */}
       {mode.kind === 'admin' && (
