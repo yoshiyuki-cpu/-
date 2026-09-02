@@ -177,12 +177,12 @@ export default function ReflectionPage() {
               <p className="text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 mb-2">
                 初めてです。自分の合言葉を決めてください。次回からこの合言葉で開きます。
               </p>
-              <input type="password" inputMode="numeric" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base mb-2"
+              <input type="password" autoComplete="off" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base mb-2"
                 value={newPasscode} onChange={e => setNewPasscode(e.target.value)} placeholder="決める合言葉（4文字以上）" />
             </>
           )}
           {picked && picked.note_passcode_hash && (
-            <input type="password" inputMode="numeric" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base mb-2"
+            <input type="password" autoComplete="off" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base mb-2"
               value={passcode} onChange={e => setPasscode(e.target.value)} placeholder="合言葉" />
           )}
 
@@ -199,12 +199,12 @@ export default function ReflectionPage() {
               <p className="text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 mb-2">
                 管理者の合言葉がまだ決まっていません。ここで決めてください。忘れると全員分が見られなくなります。
               </p>
-              <input type="password" inputMode="numeric" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base mb-2"
+              <input type="password" autoComplete="off" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base mb-2"
                 value={newPasscode} onChange={e => setNewPasscode(e.target.value)} placeholder="決める合言葉（4文字以上）" />
             </>
           )}
           {adminHash && (
-            <input type="password" inputMode="numeric" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base mb-2"
+            <input type="password" autoComplete="off" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base mb-2"
               value={passcode} onChange={e => setPasscode(e.target.value)} placeholder="管理者の合言葉" />
           )}
           <button onClick={enterAsAdmin} disabled={checking}
