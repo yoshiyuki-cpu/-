@@ -4,9 +4,6 @@ import { supabase, PipeDiagram } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
 import { jstToday } from '@/lib/date'
 
-// よく使う種別。押すとメモ欄に入る（自由入力もできる）
-const KIND_PRESETS = ['水道', 'ガス', '下水', '電気', '雨水', '浄化槽']
-
 export default function PipeDiagramPage() {
   const { id } = useParams()
   const router = useRouter()
@@ -177,17 +174,9 @@ export default function PipeDiagramPage() {
             value={date} onChange={e => setDate(e.target.value)} />
         </div>
         <div className="mb-3">
-          <label className="block text-sm font-medium mb-1">種別・メモ（任意）</label>
+          <label className="block text-sm font-medium mb-1">メモ（任意）</label>
           <input className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base" value={note}
             onChange={e => setNote(e.target.value)} placeholder="例：水道　前面道路から引込み" />
-          <div className="flex flex-wrap gap-1.5 mt-2">
-            {KIND_PRESETS.map(k => (
-              <button key={k} type="button" onClick={() => setNote(k)}
-                className={`text-xs px-2.5 py-1 rounded-full border ${note === k ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600'}`}>
-                {k}
-              </button>
-            ))}
-          </div>
         </div>
 
         {uploading !== null ? (
@@ -245,7 +234,7 @@ export default function PipeDiagramPage() {
                 <button onClick={() => setEditing({ id: p.id, note: p.note ?? '' })}
                   className="block w-full text-left">
                   <span className="text-xs font-medium text-gray-700 break-all">
-                    {p.note || <span className="text-gray-400">種別なし（タップして記入）</span>}
+                    {p.note || <span className="text-gray-400">メモなし（タップして記入）</span>}
                   </span>
                 </button>
               )}
