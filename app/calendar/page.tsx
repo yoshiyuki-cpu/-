@@ -1,11 +1,12 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { supabase, CalendarEvent, CalendarEventType } from '@/lib/supabase'
+import { supabase, CalendarEvent, CalendarEventType, Task } from '@/lib/supabase'
 import { jstToday } from '@/lib/date'
 import DailyCost from './DailyCost'
+import TaskList from '../tasks/TaskList'
 
 type Foreman = { id: number; name: string }
-type Tab = 'plan' | 'cost'
+type Tab = 'plan' | 'todo' | 'cost'
 
 const TYPE_LABELS: Record<CalendarEventType, string> = {
   construction_start: '着工',
@@ -31,6 +32,9 @@ function formatDate(d: string) {
 export default function CalendarPage() {
   const [tab, setTab] = useState<Tab>('plan')
   const [events, setEvents] = useState<CalendarEvent[]>([])
+  // 期限のある未完了のやること。予定と同じ日付の並びに出す
+  const [dueTasks, setDueTasks] = useState<Task[]>([])
+  const [workerNames, setWorkerNames] = useState<Record<number, string>>({})
   const [recipients, setRecipients] = useState<Record<number, number[]>>({})
   const [foremen, setForemen] = useState<Foreman[]>([])
   const [loading, setLoading] = useState(true)
@@ -45,12 +49,19 @@ export default function CalendarPage() {
 
   async function load() {
     setLoading(true)
-    const [{ data: ev }, { data: rc }, { data: fm }] = await Promise.all([
+    const [{ data: ev }, { data: rc }, { data: fm }, { data: tk }, { data: wk }] = await Promise.all([
       supabase.from('calendar_events').select('*').gte('event_date', jstToday()).order('event_date'),
       supabase.from('calendar_event_recipients').select('event_id, worker_id'),
       supabase.from('workers').select('id, name').eq('is_foreman', true).order('name'),
+      // 遅れているものも見せたいので、期限が過ぎた分も取る
+      supabase.from('tasks').select('*').is('done_at', null).not('due_date', 'is', null).order('due_date'),
+      supabase.from('workers').select('id, name'),
     ])
     setEvents(ev ?? [])
+    setDueTasks(tk ?? [])
+    const names: Record<number, string> = {}
+    ;(wk ?? []).forEach((w: { id: number; name: string }) => { names[w.id] = w.name })
+    setWorkerNames(names)
     const grouped: Record<number, number[]> = {}
     ;(rc ?? []).forEach((r: any) => {
       grouped[r.event_id] = [...(grouped[r.event_id] ?? []), r.worker_id]
@@ -103,6 +114,14 @@ export default function CalendarPage() {
     acc[e.event_date] = [...(acc[e.event_date] ?? []), e]
     return acc
   }, {})
+  // やることも期限の日に入れる。予定が無い日でも期限があれば日付を出す
+  const tasksByDate = dueTasks.reduce<Record<string, Task[]>>((acc, t) => {
+    const d = t.due_date as string
+    acc[d] = [...(acc[d] ?? []), t]
+    return acc
+  }, {})
+  const today = jstToday()
+  const allDates = [...new Set([...Object.keys(grouped), ...Object.keys(tasksByDate)])].sort()
 
   return (
     <div>
@@ -113,12 +132,17 @@ export default function CalendarPage() {
           className={`flex-1 py-2 rounded-full text-sm font-medium transition ${tab === 'plan' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`}>
           予定
         </button>
+        <button onClick={() => setTab('todo')}
+          className={`flex-1 py-2 rounded-full text-sm font-medium transition ${tab === 'todo' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`}>
+          やる事
+        </button>
         <button onClick={() => setTab('cost')}
           className={`flex-1 py-2 rounded-full text-sm font-medium transition ${tab === 'cost' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`}>
           日別の費用
         </button>
       </div>
 
+      {tab === 'todo' && <TaskList embedded />}
       {tab === 'cost' && <DailyCost />}
 
       {tab === 'plan' && (
@@ -173,14 +197,31 @@ export default function CalendarPage() {
       </section>
 
       <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-        <h2 className="font-bold mb-3 text-gray-700">今後の予定</h2>
+        <h2 className="font-bold mb-1 text-gray-700">今後の予定</h2>
+        <p className="text-xs text-gray-400 mb-3">期限のあるやることも、その日に出ます。</p>
         {loading && <p className="text-sm text-gray-400">読み込み中...</p>}
-        {!loading && events.length === 0 && <p className="text-sm text-gray-400">予定はありません。</p>}
+        {!loading && allDates.length === 0 && <p className="text-sm text-gray-400">予定はありません。</p>}
         <div className="flex flex-col gap-3">
-          {Object.entries(grouped).map(([date, list]) => (
+          {allDates.map(date => {
+            const list = grouped[date] ?? []
+            const dayTasks = tasksByDate[date] ?? []
+            const isLate = date < today
+            return (
             <div key={date}>
-              <p className="text-xs font-semibold text-gray-500 mb-1">{formatDate(date)}</p>
+              <p className={`text-xs font-semibold mb-1 ${isLate ? 'text-red-600' : 'text-gray-500'}`}>
+                {formatDate(date)}{isLate && '　期限切れ'}
+              </p>
               <div className="flex flex-col gap-1">
+                {dayTasks.map(t => (
+                  <button key={`t${t.id}`} onClick={() => setTab('todo')}
+                    className={`flex items-center gap-2 border rounded-xl px-3 py-2 text-left ${isLate ? 'border-red-200 bg-red-50' : 'border-amber-200 bg-amber-50'}`}>
+                    <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${isLate ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>やること</span>
+                    <span className="text-sm font-medium truncate">{t.title}</span>
+                    {t.assignee_id && workerNames[t.assignee_id] && (
+                      <span className="text-[11px] text-gray-500 shrink-0 ml-auto">{workerNames[t.assignee_id]}</span>
+                    )}
+                  </button>
+                ))}
                 {list.map(e => (
                   <div key={e.id} className="flex justify-between items-start border border-gray-100 rounded-xl px-3 py-2">
                     <div className="min-w-0">
@@ -196,7 +237,8 @@ export default function CalendarPage() {
                 ))}
               </div>
             </div>
-          ))}
+            )
+          })}
         </div>
       </section>
       </>
