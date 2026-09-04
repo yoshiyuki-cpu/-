@@ -163,9 +163,6 @@ export default function EntryPage() {
     vehicle_category: '' as '' | 'rental' | 'owned', vehicle_id: '', liter_price: '', mobilization_fee: '',
   })
 
-  useEffect(() => { loadMaster() }, [])
-  useEffect(() => { loadLaborDone() }, [id, laborDate])
-
   // 同じ現場・同じ日に人工を二度入れてしまう事故があったため、登録済みの人を先に読む
   async function loadLaborDone() {
     const { data } = await supabase.from('labor_entries')
@@ -204,6 +201,10 @@ export default function EntryPage() {
     // 確認の読み込みは入力を待たせない（失敗しても入力は普通にできる）
     loadChecklist(supabase, Number(id)).then(setCheckState).catch(() => setCheckState(null))
   }
+
+  // 読み込みは関数を定義した後に呼ぶ（先に呼ぶと lint が「宣言前の参照」と見なす）
+  useEffect(() => { loadMaster() }, [])
+  useEffect(() => { loadLaborDone() }, [id, laborDate])
 
   const isFirstVehicleUse = tab === 'lease' && !!otherForm.vehicle_id && !recordedVehicleIds.has(Number(otherForm.vehicle_id))
   const selectedVehicle = vehicles.find(v => String(v.id) === otherForm.vehicle_id)
