@@ -185,6 +185,9 @@ export default function DailyCost() {
               <div className="text-gray-500">{month}月のスクラップ収益</div>
               <div className="text-right font-medium text-blue-600">{fmtYen(monthScrap)}</div>
             </div>
+            <a href={`/report?y=${year}&m=${month}`} className="block text-center text-xs text-blue-600 mt-2">
+              この月の月次レポート（現場別・PDF） →
+            </a>
           </div>
         )}
       </section>
