@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer'
 import webpush from 'web-push'
 import { SupabaseClient } from '@supabase/supabase-js'
+import { sendSlack } from '@/lib/slack'
 
 const APP_URL = process.env.APP_URL || 'https://koji-daichou-zeta.vercel.app'
 
@@ -220,6 +221,17 @@ export async function notifyTomorrowCalendarEvents(supabase: SupabaseClient) {
     .from('calendar_event_recipients')
     .select('event_id, worker_id')
     .in('event_id', events.map((e: any) => e.id))
+
+  // Slack のチャンネルには、誰宛てかに関係なく明日の予定を1回だけ流す
+  try {
+    await sendSlack([
+      `【明日の予定 ${date.slice(5).replace('-', '/')}】`,
+      ...events.map((e: any) => {
+        const label = CALENDAR_TYPE_LABELS[e.event_type] ?? 'その他'
+        return e.note ? `・【${label}】${e.title}　${e.note}` : `・【${label}】${e.title}`
+      }),
+    ].join('\n'))
+  } catch (e) { console.error('slack send failed:', e) }
 
   const { data: foremen } = await supabase
     .from('workers').select('id, name, email, line_user_id').eq('is_foreman', true)

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { supabase, DisposalSite, WasteType, CompanySettings, Vehicle, ScaffoldMaterialPrice, FuelPrice, SupportCompany } from '@/lib/supabase'
 import Link from 'next/link'
+import { useDesign, setDesign } from '@/lib/design'
 
 type Worker = {
   id: number; name: string; company_name: string | null; email: string | null; is_foreman: boolean
@@ -402,19 +403,34 @@ export default function MasterPage() {
     ? wasteTypes.filter(w => String(w.disposal_site_id) === selectedSiteId)
     : wasteTypes
 
+  const design = useDesign()
+
   const tabClass = (t: string) =>
     `shrink-0 whitespace-nowrap px-3.5 py-2 rounded-full text-sm font-medium transition ${tab === t ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-4">
-        <h1 className="text-xl font-bold">マスタ管理</h1>
-        <div className="flex gap-1.5">
-          <Link href="/usage" className="text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">📊 利用状況</Link>
-          <Link href="/tools" className="text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🧰 置き場道具管理</Link>
-          <Link href="/notifications" className="text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🔔 通知設定</Link>
-          <Link href="/reflection" className="text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🔒 振り返り</Link>
+      <h1 className="text-xl font-bold mb-3">マスタ管理</h1>
+      {/* 横に並べると390px幅で文字が縦に割れていたので、横スクロールにして1行に収める */}
+      <div className="flex gap-1.5 mb-3 overflow-x-auto pb-1 -mx-4 px-4">
+        <Link href="/usage" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">📊 利用状況</Link>
+        <Link href="/tools" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🧰 置き場道具</Link>
+        <Link href="/notifications" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🔔 通知設定</Link>
+        <Link href="/reflection" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🔒 振り返り</Link>
+      </div>
+
+      {/* 見た目の切り替え。端末ごとに効き、記録には触らない */}
+      <div className="flex items-center justify-between bg-white border border-gray-100 rounded-xl px-3 py-2 mb-4">
+        <div>
+          <p className="text-sm font-medium">画面の見た目</p>
+          <p className="text-[11px] text-gray-400">
+            {design === 'v2' ? '新しいデザインで表示中（この端末だけ）' : '従来のデザインで表示中'}
+          </p>
         </div>
+        <button onClick={() => setDesign(design === 'v2' ? 'v1' : 'v2')}
+          className={`text-xs px-3 py-1.5 rounded-full border font-medium ${design === 'v2' ? 'border-gray-300 text-gray-600 bg-white' : 'bg-blue-600 text-white border-blue-600'}`}>
+          {design === 'v2' ? '従来に戻す' : '新しいデザインを試す'}
+        </button>
       </div>
 
       <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1">

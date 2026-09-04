@@ -32,6 +32,48 @@ input:focus, select:focus, textarea:focus {
   box-shadow: 0 0 0 3px rgb(59 130 246 / 0.15);
 }
 
+/* =====================================================================
+   新デザイン（v2）。<html data-design="v2"> のときだけ効く。
+   記録や画面の構造は変えず、見た目だけをここで上書きする。
+   マスタ画面の切り替えで従来（v1）にいつでも戻せる。
+   ===================================================================== */
+
+/* 上の帯を薄くして、画面の中身に幅を渡す（64px → 48px） */
+[data-design="v2"] .app-header { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+[data-design="v2"] .app-header-logo { width: 1.75rem; height: 1.75rem; font-size: 0.9rem; border-radius: 0.5rem; }
+[data-design="v2"] .app-header-company { display: none; }
+[data-design="v2"] .app-header-title { font-size: 1rem; }
+
+/* 本文の上下の余白を詰める（スマホでは1画面に入る量が効く） */
+[data-design="v2"] .app-main { padding-top: 0.875rem; }
+
+/* 現場一覧：表紙は畳んで、数字だけの細い帯にする */
+[data-design="v2"] .hero-v1 { display: none; }
+[data-design="v1"] .hero-v2 { display: none; }
+
+/* 現場詳細：7枚の大きなカードを、4列の小さなボタンにまとめる */
+[data-design="v2"] .project-nav { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.375rem; }
+[data-design="v2"] .project-nav > a { padding: 0.5rem 0.25rem; border-radius: 0.75rem; }
+[data-design="v2"] .project-nav > a > span:first-child { font-size: 1.25rem; line-height: 1; }
+[data-design="v2"] .project-nav > a > span:nth-child(2) { font-size: 0.7rem; white-space: nowrap; }
+[data-design="v2"] .project-nav > a > span:nth-child(3) { display: none; }
+
+/* 押しにくい小さな文字ボタン（修正・完了・削除など）に指の置き場を作る */
+[data-design="v2"] button.text-xs:not(.rounded-full):not([class*="px-"]) { padding: 0.375rem 0.5rem; margin: -0.375rem -0.5rem; }
+
+/* 下の帯：文字を少し大きく、押せる高さを確保する */
+[data-design="v2"] nav a { padding-top: 0.5rem; padding-bottom: 0.625rem; }
+[data-design="v2"] nav a > span:last-child { font-size: 11px; }
+
+/* 入力欄・選択肢は指で確実に押せる高さ（44px）にそろえる */
+[data-design="v2"] input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+[data-design="v2"] select,
+[data-design="v2"] textarea { min-height: 2.75rem; }
+
+/* カードの角と影を少し控えめにして、並んだときの境目を分かりやすくする */
+[data-design="v2"] .rounded-2xl { border-radius: 0.875rem; }
+[data-design="v2"] .shadow-sm { box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06); }
+
 @media print {
   .no-print {
     display: none !important;

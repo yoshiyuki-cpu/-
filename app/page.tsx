@@ -14,12 +14,26 @@ type ProjectWithTotals = Project & {
 
 type StatusFilter = 'all' | 'active' | 'completed'
 
+// PostgREST は1回の問い合わせで最大1000行までしか返さない。
+// 記録が増えても合計が黙って欠けないよう、無くなるまで続きを取る
+async function fetchAll<T>(build: (from: number, to: number) => PromiseLike<{ data: T[] | null }>) {
+  const PAGE = 1000
+  const rows: T[] = []
+  for (let from = 0; ; from += PAGE) {
+    const { data } = await build(from, from + PAGE - 1)
+    const chunk = data ?? []
+    rows.push(...chunk)
+    if (chunk.length < PAGE) break
+  }
+  return rows
+}
+
 export default function HomePage() {
   const [projects, setProjects] = useState<ProjectWithTotals[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
-  const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string; records: number } | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
 
@@ -37,49 +51,73 @@ export default function HomePage() {
     // （列が未追加の環境でも一覧が消えないようにするため）
     const visible = projectData.filter(p => !p.deleted_at)
 
-    const withTotals = await Promise.all(visible.map(async (p) => {
-      const [{ data: wasteEntries }, { data: otherEntries }, { data: laborEntries }, { data: scrapRecords }] = await Promise.all([
-        supabase.from('waste_entries').select('amount, waste_types(entry_type)').eq('project_id', p.id),
-        supabase.from('other_entries').select('entry_type, amount').eq('project_id', p.id),
-        supabase.from('labor_entries').select('amount').eq('project_id', p.id),
-        supabase.from('scrap_records').select('amount').eq('project_id', p.id),
-      ])
+    // 以前は現場ごとに4回ずつ問い合わせていて（24現場で約100回）、スマホの回線では
+    // 開くのに数秒かかっていた。全記録を4回で取り、現場ごとに振り分ける
+    const [wasteRows, otherRows, laborRows, scrapRows] = await Promise.all([
+      fetchAll<{ project_id: number; amount: number; waste_types: { entry_type: string } | { entry_type: string }[] | null }>(
+        (f, t) => supabase.from('waste_entries').select('project_id, amount, waste_types(entry_type)').range(f, t)),
+      fetchAll<{ project_id: number; entry_type: string; amount: number }>(
+        (f, t) => supabase.from('other_entries').select('project_id, entry_type, amount').range(f, t)),
+      fetchAll<{ project_id: number; amount: number }>(
+        (f, t) => supabase.from('labor_entries').select('project_id, amount').range(f, t)),
+      fetchAll<{ project_id: number; amount: number }>(
+        (f, t) => supabase.from('scrap_records').select('project_id, amount').range(f, t)),
+    ])
 
-      let waste_cost = 0, scrap_revenue = 0
-      wasteEntries?.forEach((e: any) => {
-        if (e.waste_types?.entry_type === 'cost') waste_cost += Number(e.amount)
-        else scrap_revenue += Number(e.amount)
-      })
-      scrapRecords?.forEach((r: any) => { scrap_revenue += Number(r.amount) })
+    const totals = new Map<number, Omit<ProjectWithTotals, keyof Project>>()
+    const of = (id: number) => {
+      if (!totals.has(id)) totals.set(id, { waste_cost: 0, scrap_revenue: 0, labor_amount: 0, fuel_amount: 0, lease_amount: 0, expense_amount: 0 })
+      return totals.get(id)!
+    }
+    const entryTypeOf = (w: { entry_type: string } | { entry_type: string }[] | null) =>
+      !w ? null : Array.isArray(w) ? w[0]?.entry_type ?? null : w.entry_type
 
-      let labor_amount = 0, fuel_amount = 0, lease_amount = 0, expense_amount = 0
-      otherEntries?.forEach((e: any) => {
-        if (e.entry_type === 'labor') labor_amount += Number(e.amount)
-        else if (e.entry_type === 'fuel') fuel_amount += Number(e.amount)
-        else if (e.entry_type === 'lease') lease_amount += Number(e.amount)
-        else if (e.entry_type === 'expense') expense_amount += Number(e.amount)
-      })
-      laborEntries?.forEach((e: any) => { labor_amount += Number(e.amount) })
+    wasteRows.forEach(e => {
+      // 現場詳細の集計と同じ扱い：cost 以外（revenue）はスクラップ収益
+      if (entryTypeOf(e.waste_types) === 'cost') of(e.project_id).waste_cost += Number(e.amount)
+      else of(e.project_id).scrap_revenue += Number(e.amount)
+    })
+    scrapRows.forEach(r => { of(r.project_id).scrap_revenue += Number(r.amount) })
+    otherRows.forEach(e => {
+      const t = of(e.project_id)
+      if (e.entry_type === 'labor') t.labor_amount += Number(e.amount)
+      else if (e.entry_type === 'fuel') t.fuel_amount += Number(e.amount)
+      else if (e.entry_type === 'lease') t.lease_amount += Number(e.amount)
+      else if (e.entry_type === 'expense') t.expense_amount += Number(e.amount)
+    })
+    laborRows.forEach(e => { of(e.project_id).labor_amount += Number(e.amount) })
 
-      return { ...p, waste_cost, scrap_revenue, labor_amount, fuel_amount, lease_amount, expense_amount }
-    }))
-
-    setProjects(withTotals)
+    setProjects(visible.map(p => ({ ...p, ...of(p.id) })))
     setLoading(false)
+  }
+
+  // 消すのではなく、ごみ箱に入れる。記録は残り、段取り画面の「ごみ箱」から戻せる。
+  // 以前はここだけ本当に削除していて、紐づく記録ごと消えて戻せなかった
+  async function askDelete(p: ProjectWithTotals) {
+    setDeleteError('')
+    const tables = ['waste_entries', 'labor_entries', 'other_entries', 'scrap_records', 'ky_photos', 'meeting_notes', 'pipe_diagrams']
+    const counts = await Promise.all(tables.map(async t => {
+      const { count } = await supabase.from(t).select('id', { count: 'exact', head: true }).eq('project_id', p.id)
+      return count ?? 0
+    }))
+    setDeleteTarget({ id: p.id, name: p.name, records: counts.reduce((s, c) => s + c, 0) })
   }
 
   async function confirmDelete() {
     if (!deleteTarget) return
     setDeleting(true)
     setDeleteError('')
-    const { error } = await supabase.from('projects').delete().eq('id', deleteTarget.id)
+    const { error } = await supabase.from('projects')
+      .update({ deleted_at: new Date().toISOString() }).eq('id', deleteTarget.id)
     setDeleting(false)
     if (error) {
-      setDeleteError('削除に失敗しました。' + error.message)
+      setDeleteError(error.message.includes('deleted_at')
+        ? 'ごみ箱の準備がまだです。Supabaseで supabase-schema-project-trash.sql を実行してください。'
+        : 'ごみ箱に入れられませんでした。' + error.message)
       return
     }
     setDeleteTarget(null)
-    loadProjects()
+    setProjects(ps => ps.filter(p => p.id !== deleteTarget.id))
   }
 
   const fmt = (n: number) => n.toLocaleString('ja-JP') + '円'
@@ -102,8 +140,8 @@ export default function HomePage() {
 
   return (
     <div>
-      {/* 表紙：会社の顔となるヒーロー */}
-      <section className="no-print relative overflow-hidden rounded-3xl mb-5 bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900 text-white shadow-lg">
+      {/* 表紙：会社の顔となるヒーロー（従来デザイン） */}
+      <section className="hero-v1 no-print relative overflow-hidden rounded-3xl mb-5 bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900 text-white shadow-lg">
         {/* 背景の重機シルエットと光 */}
         <div aria-hidden className="pointer-events-none absolute inset-0">
           {/* 右上から差す光 */}
@@ -151,6 +189,36 @@ export default function HomePage() {
             </div>
           </div>
         </div>
+      </section>
+
+      {/* 新デザイン：表紙は畳み、数字の帯と「今日の入力へ」の近道だけ置く。
+          表紙の言葉は起動時のスプラッシュに残っているので、毎回は見せない */}
+      <section className="hero-v2 no-print mb-4">
+        <div className="grid grid-cols-3 gap-2 mb-3">
+          <div className="rounded-xl bg-white border border-gray-100 shadow-sm px-3 py-2">
+            <p className="text-[10px] text-gray-400">稼働中</p>
+            <p className="text-lg font-bold leading-tight text-emerald-700">{activeCount}<span className="text-xs font-medium ml-0.5 text-gray-500">件</span></p>
+          </div>
+          <div className="rounded-xl bg-white border border-gray-100 shadow-sm px-3 py-2">
+            <p className="text-[10px] text-gray-400">完了</p>
+            <p className="text-lg font-bold leading-tight">{completedCount}<span className="text-xs font-medium ml-0.5 text-gray-500">件</span></p>
+          </div>
+          <div className="rounded-xl bg-white border border-gray-100 shadow-sm px-3 py-2">
+            <p className="text-[10px] text-gray-400">累計</p>
+            <p className="text-lg font-bold leading-tight">{projects.length}<span className="text-xs font-medium ml-0.5 text-gray-500">件</span></p>
+          </div>
+        </div>
+        {/* 職長が毎日やる操作へ、一覧を探さずに飛べる近道 */}
+        {activeCount > 0 && (
+          <div className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-1">
+            {projects.filter(p => p.status === 'active').map(p => (
+              <Link key={p.id} href={`/projects/${p.id}/entry`}
+                className="shrink-0 whitespace-nowrap bg-blue-600 text-white text-sm font-medium px-3.5 py-2 rounded-full shadow-sm">
+                ＋ {p.name} に入力
+              </Link>
+            ))}
+          </div>
+        )}
       </section>
 
       <div className="flex justify-between items-center mb-4">
@@ -210,8 +278,8 @@ export default function HomePage() {
                       {p.status === 'active' ? '進行中' : '完了'}
                     </span>
                     <button type="button"
-                      onClick={e => { e.preventDefault(); e.stopPropagation(); setDeleteError(''); setDeleteTarget({ id: p.id, name: p.name }) }}
-                      className="text-xs text-gray-300 hover:text-red-400 px-1">削除</button>
+                      onClick={e => { e.preventDefault(); e.stopPropagation(); askDelete(p) }}
+                      className="text-xs text-gray-300 hover:text-red-400 px-1">ごみ箱へ</button>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-1 text-sm mt-2">
@@ -239,11 +307,13 @@ export default function HomePage() {
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm">
-            <h3 className="font-bold text-lg mb-2">現場を削除しますか？</h3>
+            <h3 className="font-bold text-lg mb-2">ごみ箱に入れますか？</h3>
             <p className="text-sm text-gray-600 mb-4">
-              <span className="font-medium text-gray-900">{deleteTarget.name}</span> を削除します。<br />
-              この現場に紐づく廃材・経費・見積り・足場計算・議事録などの記録もすべて削除され、元に戻せません。
-              重複して作成した現場や、テストで作った現場を消すときのみ使ってください。
+              <span className="font-medium text-gray-900">{deleteTarget.name}</span> を一覧から隠します。<br />
+              {deleteTarget.records > 0
+                ? <>記録{deleteTarget.records}件も一緒に隠れますが、<span className="font-medium">消えるわけではありません。</span></>
+                : '記録は入っていません。'}
+              <br />段取り画面の「ごみ箱」からいつでも元に戻せます。
             </p>
             {deleteError && <p className="text-sm text-red-600 mb-3">{deleteError}</p>}
             <div className="flex gap-3">
@@ -252,8 +322,8 @@ export default function HomePage() {
                 キャンセル
               </button>
               <button onClick={confirmDelete} disabled={deleting}
-                className="flex-1 py-2 bg-red-600 text-white rounded-lg font-medium disabled:opacity-50">
-                {deleting ? '削除中...' : '削除する'}
+                className="flex-1 py-2 bg-gray-700 text-white rounded-lg font-medium disabled:opacity-50">
+                {deleting ? '処理中...' : 'ごみ箱に入れる'}
               </button>
             </div>
           </div>

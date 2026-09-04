@@ -88,6 +88,16 @@ export default function CalendarPage() {
       )
     }
 
+    // Google カレンダーにも写す。設定が無ければ何もしない。失敗してもアプリの予定は残す
+    if (data) {
+      try {
+        await fetch('/api/google-calendar', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'create', eventId: data.id }),
+        })
+      } catch { /* 連携の失敗で予定の登録を止めない */ }
+    }
+
     setForm({ title: '', event_type: 'construction_start', event_date: jstToday(), note: '', notify_all: true })
     setFormRecipientIds([])
     setAdding(false)
@@ -96,6 +106,13 @@ export default function CalendarPage() {
 
   async function deleteEvent(id: number) {
     if (!confirm('この予定を削除しますか？')) return
+    // 先に Google 側を消す（アプリ側を消すと google_event_id が分からなくなるため）
+    try {
+      await fetch('/api/google-calendar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', eventId: id }),
+      })
+    } catch { /* 連携の失敗で削除を止めない */ }
     await supabase.from('calendar_events').delete().eq('id', id)
     load()
   }

@@ -24,6 +24,34 @@ export default function NotificationsPage() {
   const [workerId, setWorkerId] = useState('')
   const [status, setStatus] = useState<'idle' | 'working' | 'done' | 'error' | 'unsupported'>('idle')
   const [errorMsg, setErrorMsg] = useState('')
+  // 外部連携の接続確認
+  const [slackResult, setSlackResult] = useState<string | null>(null)
+  const [googleResult, setGoogleResult] = useState<string | null>(null)
+  const [testing, setTesting] = useState<'slack' | 'google' | null>(null)
+
+  async function testSlack() {
+    setTesting('slack'); setSlackResult(null)
+    try {
+      const r = await fetch('/api/slack-test', { method: 'POST' }).then(x => x.json())
+      setSlackResult(r.ok ? 'Slack に送りました。チャンネルを確認してください。'
+        : !r.configured ? 'まだ設定されていません。Vercel に SLACK_WEBHOOK_URL を入れると使えます。'
+        : `送れませんでした：${r.message}`)
+    } catch { setSlackResult('送れませんでした。') }
+    setTesting(null)
+  }
+
+  async function testGoogle() {
+    setTesting('google'); setGoogleResult(null)
+    try {
+      const r = await fetch('/api/google-calendar').then(x => x.json())
+      const items: { date: string; summary: string }[] = r.items ?? []
+      setGoogleResult(r.ok
+        ? `つながっています。直近の予定：${items.length === 0 ? 'なし' : items.map(i => `${i.date} ${i.summary}`).join(' / ')}`
+        : !r.configured ? 'まだ設定されていません。Vercel に GOOGLE_SERVICE_ACCOUNT_JSON と GOOGLE_CALENDAR_ID を入れると使えます。'
+        : `つながりません：${r.message}`)
+    } catch { setGoogleResult('確認できませんでした。') }
+    setTesting(null)
+  }
 
   useEffect(() => {
     // 職長だけでなく、夕方の広報リマインダーを受け取る集客担当も選べるようにする
@@ -118,6 +146,33 @@ export default function NotificationsPage() {
             {status === 'error' && <p className="text-sm text-red-500 mt-3">{errorMsg}</p>}
           </>
         )}
+      </section>
+
+      <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mt-4">
+        <h2 className="font-bold text-gray-700 mb-1">外部連携</h2>
+        <p className="text-xs text-gray-500 mb-3">
+          設定は Vercel の環境変数で行います。ここでは「つながっているか」だけ確認できます。
+        </p>
+
+        <div className="border border-gray-100 rounded-xl p-3 mb-2">
+          <p className="text-sm font-medium">Slack</p>
+          <p className="text-xs text-gray-500 mb-2">段取りの確定・明日の予定・振り返りの記入をチャンネルに流します。</p>
+          <button onClick={testSlack} disabled={testing !== null}
+            className="w-full border border-blue-600 text-blue-600 py-2 rounded-lg text-sm font-medium disabled:opacity-40">
+            {testing === 'slack' ? '送信中...' : 'Slack にテスト送信'}
+          </button>
+          {slackResult && <p className="text-xs mt-2 text-gray-700">{slackResult}</p>}
+        </div>
+
+        <div className="border border-gray-100 rounded-xl p-3">
+          <p className="text-sm font-medium">Google カレンダー</p>
+          <p className="text-xs text-gray-500 mb-2">共有カレンダーの予定（着工・夜勤・見積り）を Google カレンダーにも写します。</p>
+          <button onClick={testGoogle} disabled={testing !== null}
+            className="w-full border border-blue-600 text-blue-600 py-2 rounded-lg text-sm font-medium disabled:opacity-40">
+            {testing === 'google' ? '確認中...' : 'つながっているか確認'}
+          </button>
+          {googleResult && <p className="text-xs mt-2 text-gray-700">{googleResult}</p>}
+        </div>
       </section>
     </div>
   )

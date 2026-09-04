@@ -502,8 +502,8 @@ export default function ProjectDetailPage() {
         </button>
       </div>
 
-      {/* ナビゲーション */}
-      <div className="grid grid-cols-2 gap-2 mb-4">
+      {/* ナビゲーション（新デザインでは4列の小さなボタンになる。globals.css の .project-nav） */}
+      <div className="project-nav grid grid-cols-2 gap-2 mb-4">
         <Link href={`/projects/${id}/plan`}
           className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
           <span className="text-2xl">📊</span>

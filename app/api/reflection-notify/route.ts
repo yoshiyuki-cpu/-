@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { sendReminderEmail } from '@/lib/notify'
+import { sendSlack } from '@/lib/slack'
 import { REFLECTION_NOTIFY_EMAIL_KEY } from '@/lib/passcode'
 
 // 振り返りに記入があったとき、社長に知らせる。
@@ -14,10 +15,15 @@ export async function POST(req: NextRequest) {
   const { data } = await supabase.from('app_settings')
     .select('value').eq('key', REFLECTION_NOTIFY_EMAIL_KEY)
   const to = (data ?? [])[0]?.value
-  // 通知先が未設定でも記入は成功させたいので、エラーにはしない
-  if (!to) return NextResponse.json({ ok: true, notified: 0, reason: 'no_recipient' })
-
   const label = kind === 'good' ? '良かったこと' : '悪かったこと'
+
+  // Slack にも「誰がいつ」だけ流す。本文は載せない（メールと同じ理由）
+  let slack = false
+  try { slack = await sendSlack(`【振り返り】${workerName}さんが${label}を記録しました（${date}）。内容はアプリで確認してください。`) }
+  catch { /* 届かなくても記入は残る */ }
+
+  // 通知先が未設定でも記入は成功させたいので、エラーにはしない
+  if (!to) return NextResponse.json({ ok: true, notified: slack ? 1 : 0, reason: 'no_recipient' })
   try {
     await sendReminderEmail(to, '【良心アプリ】振り返りの記入がありました', [
       `${workerName}さんが${label}を記録しました。`,
