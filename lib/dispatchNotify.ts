@@ -1,5 +1,6 @@
 import { SupabaseClient } from '@supabase/supabase-js'
 import { sendReminderEmail, sendReminderPush, sendLineMessage } from '@/lib/notify'
+import { sendSlack } from '@/lib/slack'
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土']
 
@@ -90,6 +91,10 @@ export async function notifyDispatch(supabase: SupabaseClient, date: string): Pr
       catch (e: any) { errors.push(`${f.name}LINE: ${e?.message ?? 'error'}`) }
     }
   }))
+
+  // Slack のチャンネルにも同じ表を1回だけ流す（個人宛てではなく全員が見る場所）
+  try { await sendSlack(text) }
+  catch (e: any) { errors.push(`Slack: ${e?.message ?? 'error'}`) }
 
   await supabase.from('dispatch_plans').update({ notified_at: new Date().toISOString() }).eq('id', plan.id)
 
