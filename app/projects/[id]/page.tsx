@@ -4,6 +4,8 @@ import { supabase, Project, WasteEntry, OtherEntry, DisposalSite, WasteType, Veh
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { jstToday } from '@/lib/date'
+import Checklist from './Checklist'
+import { logAction } from '@/lib/audit'
 
 type SortDir = 'asc' | 'desc'
 type DeleteTarget = { table: 'waste_entries' | 'other_entries' | 'labor_entries'; id: number; label: string }
@@ -89,6 +91,7 @@ export default function ProjectDetailPage() {
     if (!deleteTarget) return
     setDeleting(true)
     await supabase.from(deleteTarget.table).delete().eq('id', deleteTarget.id)
+    logAction(supabase, 'delete', deleteTarget.table, deleteTarget.id, `${project?.name ?? ''} の記録を消した：${deleteTarget.label}`)
     setDeleteTarget(null)
     setDeleting(false)
     load()
@@ -152,6 +155,9 @@ export default function ProjectDetailPage() {
         vehicle_id: editTarget.entry_type === 'lease' && editTarget.vehicle_id ? Number(editTarget.vehicle_id) : null,
       }).eq('id', editTarget.id)
     }
+    const editLabel = editTarget.type === 'waste' ? '廃材' : editTarget.type === 'labor' ? '人工' : 'その他費用'
+    const editTable = editTarget.type === 'waste' ? 'waste_entries' : editTarget.type === 'labor' ? 'labor_entries' : 'other_entries'
+    logAction(supabase, 'edit', editTable, editTarget.id, `${project?.name ?? ''} の${editLabel}（${editTarget.date}）を直した`)
     setEditSaving(false)
     setEditTarget(null)
     load()
@@ -182,6 +188,8 @@ export default function ProjectDetailPage() {
     const newStatus = project.status === 'active' ? 'completed' : 'active'
     const end_date = newStatus === 'completed' ? jstToday() : null
     await supabase.from('projects').update({ status: newStatus, end_date }).eq('id', id)
+    logAction(supabase, newStatus === 'completed' ? 'complete' : 'reopen', 'projects', Number(id),
+      `${project.name} を${newStatus === 'completed' ? '完了にした' : '進行中に戻した'}`)
     load()
   }
 
@@ -501,6 +509,9 @@ export default function ProjectDetailPage() {
           CSV出力
         </button>
       </div>
+
+      {/* 着工前の確認。揃っていない間は黄色で目立たせる */}
+      <Checklist projectId={Number(id)} />
 
       {/* ナビゲーション（新デザインでは4列の小さなボタンになる。globals.css の .project-nav） */}
       <div className="project-nav grid grid-cols-2 gap-2 mb-4">

@@ -417,6 +417,8 @@ export default function MasterPage() {
         <Link href="/tools" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🧰 置き場道具</Link>
         <Link href="/notifications" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🔔 通知設定</Link>
         <Link href="/reflection" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🔒 振り返り</Link>
+        <Link href="/report" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">📈 月次レポート</Link>
+        <Link href="/audit" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🧾 操作の記録</Link>
       </div>
 
       {/* 見た目の切り替え。端末ごとに効き、記録には触らない */}

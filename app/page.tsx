@@ -2,6 +2,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { supabase, Project } from '@/lib/supabase'
 import Link from 'next/link'
+import { logAction } from '@/lib/audit'
 
 type ProjectWithTotals = Project & {
   waste_cost: number
@@ -116,6 +117,8 @@ export default function HomePage() {
         : 'ごみ箱に入れられませんでした。' + error.message)
       return
     }
+    // 誰がごみ箱に入れたかを残す（福田の件で分からなかったため）
+    logAction(supabase, 'trash', 'projects', deleteTarget.id, `${deleteTarget.name} をごみ箱に入れた`)
     setDeleteTarget(null)
     setProjects(ps => ps.filter(p => p.id !== deleteTarget.id))
   }

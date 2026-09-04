@@ -1,8 +1,11 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useSyncExternalStore } from 'react'
 import { supabase, DisposalSite, WasteType, Vehicle, FuelPrice } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { jstToday } from '@/lib/date'
+import { loadChecklist, undoneItems, ChecklistState } from '@/lib/checklist'
+import { isOffline, isNetworkError, enqueue } from '@/lib/offlineQueue'
 
 type Tab = 'waste' | 'labor' | 'fuel' | 'lease' | 'expense'
 type Worker = { id: number; name: string; company_name: string | null }
@@ -11,6 +14,15 @@ const LABOR_UNIT_PRICE_TAX_EXCL = 15000
 const LABOR_UNIT_PRICE = Math.round(LABOR_UNIT_PRICE_TAX_EXCL * 1.1)
 const LABOR_UNIT_PRICE_HALF = Math.round(LABOR_UNIT_PRICE / 2)
 type DayType = 'full' | 'half'
+
+// ブラウザの音声認識（Web Speech API）。型定義が標準に無いので必要な分だけ書く
+type SpeechRecognitionLike = {
+  lang: string; continuous: boolean; interimResults: boolean
+  onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null
+  onerror: (() => void) | null
+  onend: (() => void) | null
+  start: () => void; stop: () => void
+}
 
 // スマホカメラの写真は数MB〜十数MBあり、そのままbase64送信するとモバイルブラウザがメモリ不足で
 // 落ちたり(画面が真っ黒になる)Vercelのリクエストサイズ上限を超えたりするため、送信前に縮小・JPEG化する
@@ -51,7 +63,94 @@ export default function EntryPage() {
   const [recordedVehicleIds, setRecordedVehicleIds] = useState<Set<number>>(new Set())
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
+  // 圏外で端末に貯めたとき、その旨を出す
+  const [queued, setQueued] = useState(false)
   const [receiptError, setReceiptError] = useState<string | null>(null)
+
+  // 保存する。圏外なら端末に貯める。回線以外の理由で断られたら false
+  async function insertOrQueue(table: string, rows: Record<string, unknown>[], label: string): Promise<'sent' | 'queued' | 'error'> {
+    if (isOffline()) { enqueue(table, rows, label); return 'queued' }
+    const { error } = await supabase.from(table).insert(rows)
+    if (!error) return 'sent'
+    if (isNetworkError(error)) { enqueue(table, rows, label); return 'queued' }
+    return 'error'
+  }
+
+  function showSaved(result: 'sent' | 'queued') {
+    setQueued(result === 'queued')
+    setSuccess(true)
+    setTimeout(() => { setSuccess(false); setQueued(false) }, result === 'queued' ? 4000 : 2000)
+  }
+  // 着工前の確認が揃っていない間、入力画面の上で知らせる（入力は止めない）
+  const [checkState, setCheckState] = useState<ChecklistState | null>(null)
+
+  // 人工の音声入力。「横山と田中、全日。松尾は半日」→ 選択に反映。保存は職長が押す
+  // 対応しているブラウザかどうか。サーバー側の描画では「非対応」にして、端末で読み直す
+  const voiceSupported = useSyncExternalStore(
+    () => () => {},
+    () => { const w = window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown }; return !!(w.SpeechRecognition || w.webkitSpeechRecognition) },
+    () => false,
+  )
+  const [recording, setRecording] = useState(false)
+  const [voiceText, setVoiceText] = useState('')
+  const [voiceBusy, setVoiceBusy] = useState(false)
+  const [voiceMsg, setVoiceMsg] = useState<string | null>(null)
+  const recognitionRef = useRef<{ stop: () => void } | null>(null)
+
+  function startVoice() {
+    const w = window as unknown as { SpeechRecognition?: new () => SpeechRecognitionLike; webkitSpeechRecognition?: new () => SpeechRecognitionLike }
+    const SR = w.SpeechRecognition || w.webkitSpeechRecognition
+    if (!SR) { setVoiceMsg('このブラウザは音声入力に対応していません。名前を押して選んでください。'); return }
+    setVoiceMsg(null); setVoiceText('')
+    const rec = new SR()
+    rec.lang = 'ja-JP'; rec.continuous = true; rec.interimResults = true
+    rec.onresult = (e) => {
+      let t = ''
+      for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript
+      setVoiceText(t)
+    }
+    rec.onerror = () => { setVoiceMsg('音声を聞き取れませんでした。もう一度押して話してください。'); setRecording(false) }
+    rec.onend = () => setRecording(false)
+    recognitionRef.current = rec
+    rec.start()
+    setRecording(true)
+  }
+
+  function stopVoice() {
+    recognitionRef.current?.stop()
+    setRecording(false)
+  }
+
+  async function applyVoice() {
+    if (!voiceText.trim()) return
+    setVoiceBusy(true); setVoiceMsg(null)
+    try {
+      const res = await fetch('/api/analyze-voice-labor', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: voiceText, workers: workers.map(w => ({ id: w.id, name: w.name })) }),
+      })
+      if (!res.ok) throw new Error('request failed')
+      const json = await res.json() as { entries: { worker_id: number; day_type: DayType }[]; unmatched: string[]; failed?: boolean }
+      // 登録済み（二重登録防止）の人は入れない
+      const picked = json.entries.filter(e => !(e.worker_id in laborDone))
+      if (picked.length === 0) {
+        setVoiceMsg(json.failed ? '読み取れませんでした。名前を押して選んでください。' : '一覧にある名前が聞き取れませんでした。名前を押して選んでください。')
+      } else {
+        setWorkerDayType(prev => {
+          const next = { ...prev }
+          picked.forEach(e => { next[e.worker_id] = e.day_type })
+          return next
+        })
+        const names = picked.map(e => `${workers.find(w => w.id === e.worker_id)?.name ?? ''}${e.day_type === 'half' ? '（半日）' : ''}`)
+        setVoiceMsg(`${names.join('・')} を選びました。確認して「保存する」を押してください。`
+          + (json.unmatched.length ? `　※聞き取れなかった名前：${json.unmatched.join('・')}` : ''))
+      }
+    } catch {
+      setVoiceMsg('読み取りに失敗しました。名前を押して選んでください。')
+    } finally {
+      setVoiceBusy(false)
+    }
+  }
 
   const today = jstToday()
   const [wasteForm, setWasteForm] = useState({ date: today, site_id: '', waste_type_id: '', quantity: '' })
@@ -63,9 +162,6 @@ export default function EntryPage() {
     date: today, unit_price: '', note: '', quantity: '', fuel_type: '' as '' | '軽油' | 'レギュラー',
     vehicle_category: '' as '' | 'rental' | 'owned', vehicle_id: '', liter_price: '', mobilization_fee: '',
   })
-
-  useEffect(() => { loadMaster() }, [])
-  useEffect(() => { loadLaborDone() }, [id, laborDate])
 
   // 同じ現場・同じ日に人工を二度入れてしまう事故があったため、登録済みの人を先に読む
   async function loadLaborDone() {
@@ -102,7 +198,13 @@ export default function EntryPage() {
     setVehicles(v ?? [])
     setRecordedVehicleIds(new Set(((le ?? []) as { vehicle_id: number }[]).map(e => e.vehicle_id)))
     setFuelPrices(fp ?? [])
+    // 確認の読み込みは入力を待たせない（失敗しても入力は普通にできる）
+    loadChecklist(supabase, Number(id)).then(setCheckState).catch(() => setCheckState(null))
   }
+
+  // 読み込みは関数を定義した後に呼ぶ（先に呼ぶと lint が「宣言前の参照」と見なす）
+  useEffect(() => { loadMaster() }, [])
+  useEffect(() => { loadLaborDone() }, [id, laborDate])
 
   const isFirstVehicleUse = tab === 'lease' && !!otherForm.vehicle_id && !recordedVehicleIds.has(Number(otherForm.vehicle_id))
   const selectedVehicle = vehicles.find(v => String(v.id) === otherForm.vehicle_id)
@@ -132,28 +234,32 @@ export default function EntryPage() {
     e.preventDefault()
     if (!wasteForm.waste_type_id || !wasteForm.quantity) return
     setSaving(true)
-    await supabase.from('waste_entries').insert({
+    const result = await insertOrQueue('waste_entries', [{
       project_id: Number(id),
       waste_type_id: Number(wasteForm.waste_type_id),
       date: wasteForm.date,
       quantity: Number(wasteForm.quantity),
       amount: estimatedAmount ?? 0,
-    })
+    }], `廃材 ${selectedType?.name ?? ''} ${wasteForm.quantity}${selectedType?.unit ?? ''}（${wasteForm.date.slice(5).replace('-', '/')}）`)
     setSaving(false)
-    setSuccess(true)
+    if (result === 'error') { alert('保存できませんでした。もう一度お試しください。'); return }
+    showSaved(result)
     // 日付・処分場を引き継ぎ、廃材種類と数量のみリセット
     setWasteForm(f => ({ ...f, waste_type_id: '', quantity: '' }))
-    setTimeout(() => setSuccess(false), 2000)
   }
 
   async function saveLabor(e: React.FormEvent) {
     e.preventDefault()
     if (Object.keys(workerDayType).length === 0) return
     setSaving(true)
-    // 保存を押す直前にもう一度DBを見る。別の職長が同じ日を入れていた場合に重ねないため
-    const { data: latest } = await supabase.from('labor_entries')
-      .select('worker_id').eq('project_id', Number(id)).eq('date', laborDate)
-    const already = new Set((latest ?? []).map((e: { worker_id: number }) => e.worker_id))
+    // 保存を押す直前にもう一度DBを見る。別の職長が同じ日を入れていた場合に重ねないため。
+    // 圏外ではこの確認ができないので、画面で読めていた分（laborDone）だけで判断する
+    let already = new Set<number>(Object.keys(laborDone).map(Number))
+    if (!isOffline()) {
+      const { data: latest } = await supabase.from('labor_entries')
+        .select('worker_id').eq('project_id', Number(id)).eq('date', laborDate)
+      if (latest) already = new Set(latest.map((e: { worker_id: number }) => e.worker_id))
+    }
     const entries = Object.entries(workerDayType).filter(([workerId]) => !already.has(Number(workerId)))
     if (entries.length === 0) {
       setSaving(false)
@@ -161,20 +267,19 @@ export default function EntryPage() {
       await loadLaborDone()
       return
     }
-    await Promise.all(entries.map(([workerId, dayType]) =>
-      supabase.from('labor_entries').insert({
-        project_id: Number(id),
-        worker_id: Number(workerId),
-        date: laborDate,
-        day_type: dayType,
-        amount: dayType === 'half' ? LABOR_UNIT_PRICE_HALF : LABOR_UNIT_PRICE,
-      })
-    ))
+    const rows = entries.map(([workerId, dayType]) => ({
+      project_id: Number(id),
+      worker_id: Number(workerId),
+      date: laborDate,
+      day_type: dayType,
+      amount: dayType === 'half' ? LABOR_UNIT_PRICE_HALF : LABOR_UNIT_PRICE,
+    }))
+    const result = await insertOrQueue('labor_entries', rows, `人工 ${rows.length}名（${laborDate.slice(5).replace('-', '/')}）`)
     setSaving(false)
-    setSuccess(true)
+    if (result === 'error') { alert('保存できませんでした。もう一度お試しください。'); return }
+    showSaved(result)
     setWorkerDayType({})
-    await loadLaborDone()
-    setTimeout(() => setSuccess(false), 2000)
+    if (result === 'sent') await loadLaborDone()
   }
 
   async function saveOther(e: React.FormEvent) {
@@ -211,12 +316,13 @@ export default function EntryPage() {
         vehicle_id: vehicleId,
       })
     }
-    await supabase.from('other_entries').insert(rows)
-    if (vehicleId) setRecordedVehicleIds((prev: Set<number>) => new Set(prev).add(vehicleId))
+    const tabLabel = tab === 'fuel' ? '燃料代' : tab === 'lease' ? '車両代' : '経費'
+    const result = await insertOrQueue('other_entries', rows, `${tabLabel} ${amount.toLocaleString()}円（${otherForm.date.slice(5).replace('-', '/')}）`)
     setSaving(false)
-    setSuccess(true)
+    if (result === 'error') { alert('保存できませんでした。もう一度お試しください。'); return }
+    if (vehicleId) setRecordedVehicleIds((prev: Set<number>) => new Set(prev).add(vehicleId))
+    showSaved(result)
     setOtherForm({ date: otherForm.date, unit_price: '', note: '', quantity: '', fuel_type: '', vehicle_category: '', vehicle_id: '', liter_price: '', mobilization_fee: '' })
-    setTimeout(() => setSuccess(false), 2000)
   }
 
   const tabClass = (t: Tab) =>
@@ -227,8 +333,22 @@ export default function EntryPage() {
       <button onClick={() => router.back()} className="text-blue-600 text-sm mb-3">← 現場詳細</button>
       <h1 className="text-xl font-bold mb-4">記録入力</h1>
 
-      {success && (
+      {checkState && !checkState.missingTable && undoneItems(checkState).length > 0 && (
+        <Link href={`/projects/${id}`}
+          className="block bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mb-3 text-sm text-amber-900">
+          <span className="font-semibold">着工前の確認が {undoneItems(checkState).length} 件残っています：</span>
+          {undoneItems(checkState).map(i => i.label.replace(/を.*$/, '')).join('・')}
+          <span className="block text-[11px] text-amber-700 mt-0.5">現場詳細で確認して押してください（入力はこのまま続けられます）</span>
+        </Link>
+      )}
+
+      {success && !queued && (
         <div className="bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl px-3 py-2 mb-3 text-sm font-medium">保存しました ✓</div>
+      )}
+      {success && queued && (
+        <div className="bg-amber-50 text-amber-900 border border-amber-200 rounded-xl px-3 py-2 mb-3 text-sm font-medium">
+          圏外なので端末に貯めました。つながったら自動で送ります ✓
+        </div>
       )}
 
       <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1">
@@ -295,6 +415,35 @@ export default function EntryPage() {
             <label className="block text-sm font-medium mb-2">作業員を選択（複数可）</label>
             {workers.length === 0 && (
               <p className="text-sm text-gray-400">マスタページで作業員を登録してください</p>
+            )}
+
+            {/* 声で選ぶ。手袋のまま使える。結果は選択に入るだけで、保存は下のボタン */}
+            {voiceSupported && workers.length > 0 && (
+              <div className="border border-gray-200 rounded-xl p-3 mb-3 bg-gray-50">
+                <div className="flex gap-2">
+                  {!recording ? (
+                    <button type="button" onClick={startVoice} disabled={voiceBusy}
+                      className="flex-1 py-2.5 rounded-xl bg-white border border-blue-300 text-blue-700 text-sm font-medium disabled:opacity-40">
+                      🎤 声で選ぶ
+                    </button>
+                  ) : (
+                    <button type="button" onClick={stopVoice}
+                      className="flex-1 py-2.5 rounded-xl bg-red-600 text-white text-sm font-medium">
+                      ■ 話し終わった
+                    </button>
+                  )}
+                  {voiceText && !recording && (
+                    <button type="button" onClick={applyVoice} disabled={voiceBusy}
+                      className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium disabled:opacity-40">
+                      {voiceBusy ? '読み取り中...' : '読み取って選ぶ'}
+                    </button>
+                  )}
+                </div>
+                <p className="text-[11px] text-gray-500 mt-1.5">
+                  {recording ? '例：「横山と田中、全日。松尾は半日」' : voiceText ? `聞き取り：${voiceText}` : '押して、今日働いた人の名前と全日か半日かを話してください'}
+                </p>
+                {voiceMsg && <p className="text-xs text-blue-800 mt-1.5">{voiceMsg}</p>}
+              </div>
             )}
             {Object.keys(laborDone).length > 0 && (
               <p className="text-xs text-gray-500 mb-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
