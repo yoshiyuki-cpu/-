@@ -4,6 +4,7 @@ import { supabase, Project, WasteEntry, OtherEntry, DisposalSite, WasteType, Veh
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { jstToday } from '@/lib/date'
+import Checklist from './Checklist'
 
 type SortDir = 'asc' | 'desc'
 type DeleteTarget = { table: 'waste_entries' | 'other_entries' | 'labor_entries'; id: number; label: string }
@@ -501,6 +502,9 @@ export default function ProjectDetailPage() {
           CSV出力
         </button>
       </div>
+
+      {/* 着工前の確認。揃っていない間は黄色で目立たせる */}
+      <Checklist projectId={Number(id)} />
 
       {/* ナビゲーション（新デザインでは4列の小さなボタンになる。globals.css の .project-nav） */}
       <div className="project-nav grid grid-cols-2 gap-2 mb-4">
