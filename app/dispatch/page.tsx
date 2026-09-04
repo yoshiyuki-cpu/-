@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase, Project, SupportCompany, DispatchGroup } from '@/lib/supabase'
+import { logAction } from '@/lib/audit'
 
 type Worker = { id: number; name: string; in_dispatch: boolean; usage?: number }
 type Assignment = { id: number; group_id: number; worker_id: number }
@@ -331,6 +332,7 @@ export default function DispatchPage() {
     setGroups(gs => gs.filter(g => g.project_id !== p.id))
     setAssignments(as => as.filter(a => !gone.includes(a.group_id)))
     setTrashed(ts => [{ ...p, deleted_at: new Date().toISOString() }, ...ts])
+    logAction(supabase, 'trash', 'projects', p.id, `${p.name} をごみ箱に入れた`)
     setMessage(`「${p.name}」をごみ箱に入れました。`)
   }
 
@@ -360,6 +362,7 @@ export default function DispatchPage() {
 
   async function restoreProject(p: Project) {
     await supabase.from('projects').update({ deleted_at: null }).eq('id', p.id)
+    logAction(supabase, 'restore', 'projects', p.id, `${p.name} をごみ箱から戻した`)
     setTrashed(ts => ts.filter(x => x.id !== p.id))
     if (p.status === 'active') setProjects(ps => [...ps, p].sort((a, b) => a.name.localeCompare(b.name, 'ja')))
     setMessage(`「${p.name}」を元に戻しました。`)
@@ -374,6 +377,7 @@ export default function DispatchPage() {
       `これは元に戻せません。`)) return
     const { error } = await supabase.from('projects').delete().eq('id', p.id)
     if (error) { setMessage('完全削除に失敗しました。'); return }
+    logAction(supabase, 'purge', 'projects', p.id, `${p.name} を完全に削除した（記録${count}件）`)
     setTrashed(ts => ts.filter(x => x.id !== p.id))
     setMessage(`「${p.name}」を完全に削除しました。`)
   }
@@ -383,6 +387,7 @@ export default function DispatchPage() {
   async function completeProject(p: Project) {
     if (!confirm(`「${p.name}」を完了にしますか？\n段取りの行き先から外れます。記録（廃材・人工・写真など）は残ります。`)) return
     await supabase.from('projects').update({ status: 'completed' }).eq('id', p.id)
+    logAction(supabase, 'complete', 'projects', p.id, `${p.name} を完了にした`)
     setProjects(ps => ps.filter(x => x.id !== p.id))
   }
 

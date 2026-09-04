@@ -4,6 +4,7 @@ import BottomNav from "./BottomNav";
 import SplashScreen from "./SplashScreen";
 import DesignProvider from "./DesignProvider";
 import OfflineBanner from "./OfflineBanner";
+import UserBadge from "./UserBadge";
 
 export const metadata: Metadata = {
   title: "良心アプリ",
@@ -34,6 +35,7 @@ export default function RootLayout({
               <p className="app-header-company text-[10px] tracking-widest text-blue-200/90">株式会社良心</p>
               <p className="app-header-title text-lg font-bold">良心アプリ</p>
             </div>
+            <UserBadge />
           </div>
         </header>
         <OfflineBanner />
