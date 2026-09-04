@@ -14,14 +14,14 @@ function ReportInner() {
   const [year, setYear] = useState(Number(params.get('y')) || prev.getFullYear())
   const [month, setMonth] = useState(Number(params.get('m')) || prev.getMonth() + 1)
   const [report, setReport] = useState<MonthlyReport | null>(null)
-  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const sheetRef = useRef<HTMLDivElement>(null)
+  // 表示中の月の集計がまだ来ていなければ「集計中」
+  const loading = !report || report.year !== year || report.month !== month
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    buildMonthlyReport(supabase, year, month).then(r => { if (!cancelled) { setReport(r); setLoading(false) } })
+    buildMonthlyReport(supabase, year, month).then(r => { if (!cancelled) setReport(r) })
     return () => { cancelled = true }
   }, [year, month])
 

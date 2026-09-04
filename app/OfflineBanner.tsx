@@ -1,26 +1,34 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useOfflineQueue, flushQueue, removeQueued } from '@/lib/offlineQueue'
+
+// 回線の有無。サーバー側の描画では「つながっている」とみなす
+function subscribeOnline(cb: () => void) {
+  window.addEventListener('online', cb)
+  window.addEventListener('offline', cb)
+  return () => { window.removeEventListener('online', cb); window.removeEventListener('offline', cb) }
+}
+function useOnline() {
+  return useSyncExternalStore(subscribeOnline, () => navigator.onLine, () => true)
+}
 
 // どの画面にいても、未送信の入力があれば上に出す。つながった時に自動で送る。
 // あわせて service worker を全画面で登録し、一度開いた画面を圏外でも開けるようにする
 export default function OfflineBanner() {
   const queue = useOfflineQueue()
-  const [online, setOnline] = useState(true)
+  const online = useOnline()
   const [sending, setSending] = useState(false)
   const [lastSent, setLastSent] = useState<number | null>(null)
 
+  // つながった瞬間と、開いた時に貯めた分を送る
   useEffect(() => {
-    setOnline(navigator.onLine)
-    const up = async () => { setOnline(true); await send() }
-    const down = () => setOnline(false)
-    window.addEventListener('online', up)
-    window.addEventListener('offline', down)
-    if (navigator.onLine) send()
+    if (online) send()
+  }, [online])
+
+  useEffect(() => {
     // 圏外でも画面を開けるように。失敗しても何も起きないだけ
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {})
-    return () => { window.removeEventListener('online', up); window.removeEventListener('offline', down) }
   }, [])
 
   async function send() {

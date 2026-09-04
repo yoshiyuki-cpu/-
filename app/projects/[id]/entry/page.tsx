@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useSyncExternalStore } from 'react'
 import { supabase, DisposalSite, WasteType, Vehicle, FuelPrice } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -85,17 +85,17 @@ export default function EntryPage() {
   const [checkState, setCheckState] = useState<ChecklistState | null>(null)
 
   // 人工の音声入力。「横山と田中、全日。松尾は半日」→ 選択に反映。保存は職長が押す
-  const [voiceSupported, setVoiceSupported] = useState(false)
+  // 対応しているブラウザかどうか。サーバー側の描画では「非対応」にして、端末で読み直す
+  const voiceSupported = useSyncExternalStore(
+    () => () => {},
+    () => { const w = window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown }; return !!(w.SpeechRecognition || w.webkitSpeechRecognition) },
+    () => false,
+  )
   const [recording, setRecording] = useState(false)
   const [voiceText, setVoiceText] = useState('')
   const [voiceBusy, setVoiceBusy] = useState(false)
   const [voiceMsg, setVoiceMsg] = useState<string | null>(null)
   const recognitionRef = useRef<{ stop: () => void } | null>(null)
-
-  useEffect(() => {
-    const w = window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown }
-    setVoiceSupported(!!(w.SpeechRecognition || w.webkitSpeechRecognition))
-  }, [])
 
   function startVoice() {
     const w = window as unknown as { SpeechRecognition?: new () => SpeechRecognitionLike; webkitSpeechRecognition?: new () => SpeechRecognitionLike }
