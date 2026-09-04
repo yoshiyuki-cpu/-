@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { jstToday } from '@/lib/date'
 import { loadChecklist, undoneItems, ChecklistState } from '@/lib/checklist'
+import { isOffline, isNetworkError, enqueue } from '@/lib/offlineQueue'
 
 type Tab = 'waste' | 'labor' | 'fuel' | 'lease' | 'expense'
 type Worker = { id: number; name: string; company_name: string | null }
@@ -62,7 +63,24 @@ export default function EntryPage() {
   const [recordedVehicleIds, setRecordedVehicleIds] = useState<Set<number>>(new Set())
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
+  // 圏外で端末に貯めたとき、その旨を出す
+  const [queued, setQueued] = useState(false)
   const [receiptError, setReceiptError] = useState<string | null>(null)
+
+  // 保存する。圏外なら端末に貯める。回線以外の理由で断られたら false
+  async function insertOrQueue(table: string, rows: Record<string, unknown>[], label: string): Promise<'sent' | 'queued' | 'error'> {
+    if (isOffline()) { enqueue(table, rows, label); return 'queued' }
+    const { error } = await supabase.from(table).insert(rows)
+    if (!error) return 'sent'
+    if (isNetworkError(error)) { enqueue(table, rows, label); return 'queued' }
+    return 'error'
+  }
+
+  function showSaved(result: 'sent' | 'queued') {
+    setQueued(result === 'queued')
+    setSuccess(true)
+    setTimeout(() => { setSuccess(false); setQueued(false) }, result === 'queued' ? 4000 : 2000)
+  }
   // 着工前の確認が揃っていない間、入力画面の上で知らせる（入力は止めない）
   const [checkState, setCheckState] = useState<ChecklistState | null>(null)
 
@@ -215,28 +233,32 @@ export default function EntryPage() {
     e.preventDefault()
     if (!wasteForm.waste_type_id || !wasteForm.quantity) return
     setSaving(true)
-    await supabase.from('waste_entries').insert({
+    const result = await insertOrQueue('waste_entries', [{
       project_id: Number(id),
       waste_type_id: Number(wasteForm.waste_type_id),
       date: wasteForm.date,
       quantity: Number(wasteForm.quantity),
       amount: estimatedAmount ?? 0,
-    })
+    }], `廃材 ${selectedType?.name ?? ''} ${wasteForm.quantity}${selectedType?.unit ?? ''}（${wasteForm.date.slice(5).replace('-', '/')}）`)
     setSaving(false)
-    setSuccess(true)
+    if (result === 'error') { alert('保存できませんでした。もう一度お試しください。'); return }
+    showSaved(result)
     // 日付・処分場を引き継ぎ、廃材種類と数量のみリセット
     setWasteForm(f => ({ ...f, waste_type_id: '', quantity: '' }))
-    setTimeout(() => setSuccess(false), 2000)
   }
 
   async function saveLabor(e: React.FormEvent) {
     e.preventDefault()
     if (Object.keys(workerDayType).length === 0) return
     setSaving(true)
-    // 保存を押す直前にもう一度DBを見る。別の職長が同じ日を入れていた場合に重ねないため
-    const { data: latest } = await supabase.from('labor_entries')
-      .select('worker_id').eq('project_id', Number(id)).eq('date', laborDate)
-    const already = new Set((latest ?? []).map((e: { worker_id: number }) => e.worker_id))
+    // 保存を押す直前にもう一度DBを見る。別の職長が同じ日を入れていた場合に重ねないため。
+    // 圏外ではこの確認ができないので、画面で読めていた分（laborDone）だけで判断する
+    let already = new Set<number>(Object.keys(laborDone).map(Number))
+    if (!isOffline()) {
+      const { data: latest } = await supabase.from('labor_entries')
+        .select('worker_id').eq('project_id', Number(id)).eq('date', laborDate)
+      if (latest) already = new Set(latest.map((e: { worker_id: number }) => e.worker_id))
+    }
     const entries = Object.entries(workerDayType).filter(([workerId]) => !already.has(Number(workerId)))
     if (entries.length === 0) {
       setSaving(false)
@@ -244,20 +266,19 @@ export default function EntryPage() {
       await loadLaborDone()
       return
     }
-    await Promise.all(entries.map(([workerId, dayType]) =>
-      supabase.from('labor_entries').insert({
-        project_id: Number(id),
-        worker_id: Number(workerId),
-        date: laborDate,
-        day_type: dayType,
-        amount: dayType === 'half' ? LABOR_UNIT_PRICE_HALF : LABOR_UNIT_PRICE,
-      })
-    ))
+    const rows = entries.map(([workerId, dayType]) => ({
+      project_id: Number(id),
+      worker_id: Number(workerId),
+      date: laborDate,
+      day_type: dayType,
+      amount: dayType === 'half' ? LABOR_UNIT_PRICE_HALF : LABOR_UNIT_PRICE,
+    }))
+    const result = await insertOrQueue('labor_entries', rows, `人工 ${rows.length}名（${laborDate.slice(5).replace('-', '/')}）`)
     setSaving(false)
-    setSuccess(true)
+    if (result === 'error') { alert('保存できませんでした。もう一度お試しください。'); return }
+    showSaved(result)
     setWorkerDayType({})
-    await loadLaborDone()
-    setTimeout(() => setSuccess(false), 2000)
+    if (result === 'sent') await loadLaborDone()
   }
 
   async function saveOther(e: React.FormEvent) {
@@ -294,12 +315,13 @@ export default function EntryPage() {
         vehicle_id: vehicleId,
       })
     }
-    await supabase.from('other_entries').insert(rows)
-    if (vehicleId) setRecordedVehicleIds((prev: Set<number>) => new Set(prev).add(vehicleId))
+    const tabLabel = tab === 'fuel' ? '燃料代' : tab === 'lease' ? '車両代' : '経費'
+    const result = await insertOrQueue('other_entries', rows, `${tabLabel} ${amount.toLocaleString()}円（${otherForm.date.slice(5).replace('-', '/')}）`)
     setSaving(false)
-    setSuccess(true)
+    if (result === 'error') { alert('保存できませんでした。もう一度お試しください。'); return }
+    if (vehicleId) setRecordedVehicleIds((prev: Set<number>) => new Set(prev).add(vehicleId))
+    showSaved(result)
     setOtherForm({ date: otherForm.date, unit_price: '', note: '', quantity: '', fuel_type: '', vehicle_category: '', vehicle_id: '', liter_price: '', mobilization_fee: '' })
-    setTimeout(() => setSuccess(false), 2000)
   }
 
   const tabClass = (t: Tab) =>
@@ -319,8 +341,13 @@ export default function EntryPage() {
         </Link>
       )}
 
-      {success && (
+      {success && !queued && (
         <div className="bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl px-3 py-2 mb-3 text-sm font-medium">保存しました ✓</div>
+      )}
+      {success && queued && (
+        <div className="bg-amber-50 text-amber-900 border border-amber-200 rounded-xl px-3 py-2 mb-3 text-sm font-medium">
+          圏外なので端末に貯めました。つながったら自動で送ります ✓
+        </div>
       )}
 
       <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1">

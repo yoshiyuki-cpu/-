@@ -3,6 +3,7 @@ import "./globals.css";
 import BottomNav from "./BottomNav";
 import SplashScreen from "./SplashScreen";
 import DesignProvider from "./DesignProvider";
+import OfflineBanner from "./OfflineBanner";
 
 export const metadata: Metadata = {
   title: "良心アプリ",
@@ -35,6 +36,7 @@ export default function RootLayout({
             </div>
           </div>
         </header>
+        <OfflineBanner />
         <main className="app-main max-w-2xl mx-auto px-4 py-6 pb-28">
           {children}
         </main>
