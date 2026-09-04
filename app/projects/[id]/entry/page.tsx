@@ -1,8 +1,10 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase, DisposalSite, WasteType, Vehicle, FuelPrice } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { jstToday } from '@/lib/date'
+import { loadChecklist, undoneItems, ChecklistState } from '@/lib/checklist'
 
 type Tab = 'waste' | 'labor' | 'fuel' | 'lease' | 'expense'
 type Worker = { id: number; name: string; company_name: string | null }
@@ -11,6 +13,15 @@ const LABOR_UNIT_PRICE_TAX_EXCL = 15000
 const LABOR_UNIT_PRICE = Math.round(LABOR_UNIT_PRICE_TAX_EXCL * 1.1)
 const LABOR_UNIT_PRICE_HALF = Math.round(LABOR_UNIT_PRICE / 2)
 type DayType = 'full' | 'half'
+
+// ブラウザの音声認識（Web Speech API）。型定義が標準に無いので必要な分だけ書く
+type SpeechRecognitionLike = {
+  lang: string; continuous: boolean; interimResults: boolean
+  onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null
+  onerror: (() => void) | null
+  onend: (() => void) | null
+  start: () => void; stop: () => void
+}
 
 // スマホカメラの写真は数MB〜十数MBあり、そのままbase64送信するとモバイルブラウザがメモリ不足で
 // 落ちたり(画面が真っ黒になる)Vercelのリクエストサイズ上限を超えたりするため、送信前に縮小・JPEG化する
@@ -52,6 +63,76 @@ export default function EntryPage() {
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
   const [receiptError, setReceiptError] = useState<string | null>(null)
+  // 着工前の確認が揃っていない間、入力画面の上で知らせる（入力は止めない）
+  const [checkState, setCheckState] = useState<ChecklistState | null>(null)
+
+  // 人工の音声入力。「横山と田中、全日。松尾は半日」→ 選択に反映。保存は職長が押す
+  const [voiceSupported, setVoiceSupported] = useState(false)
+  const [recording, setRecording] = useState(false)
+  const [voiceText, setVoiceText] = useState('')
+  const [voiceBusy, setVoiceBusy] = useState(false)
+  const [voiceMsg, setVoiceMsg] = useState<string | null>(null)
+  const recognitionRef = useRef<{ stop: () => void } | null>(null)
+
+  useEffect(() => {
+    const w = window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown }
+    setVoiceSupported(!!(w.SpeechRecognition || w.webkitSpeechRecognition))
+  }, [])
+
+  function startVoice() {
+    const w = window as unknown as { SpeechRecognition?: new () => SpeechRecognitionLike; webkitSpeechRecognition?: new () => SpeechRecognitionLike }
+    const SR = w.SpeechRecognition || w.webkitSpeechRecognition
+    if (!SR) { setVoiceMsg('このブラウザは音声入力に対応していません。名前を押して選んでください。'); return }
+    setVoiceMsg(null); setVoiceText('')
+    const rec = new SR()
+    rec.lang = 'ja-JP'; rec.continuous = true; rec.interimResults = true
+    rec.onresult = (e) => {
+      let t = ''
+      for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript
+      setVoiceText(t)
+    }
+    rec.onerror = () => { setVoiceMsg('音声を聞き取れませんでした。もう一度押して話してください。'); setRecording(false) }
+    rec.onend = () => setRecording(false)
+    recognitionRef.current = rec
+    rec.start()
+    setRecording(true)
+  }
+
+  function stopVoice() {
+    recognitionRef.current?.stop()
+    setRecording(false)
+  }
+
+  async function applyVoice() {
+    if (!voiceText.trim()) return
+    setVoiceBusy(true); setVoiceMsg(null)
+    try {
+      const res = await fetch('/api/analyze-voice-labor', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: voiceText, workers: workers.map(w => ({ id: w.id, name: w.name })) }),
+      })
+      if (!res.ok) throw new Error('request failed')
+      const json = await res.json() as { entries: { worker_id: number; day_type: DayType }[]; unmatched: string[]; failed?: boolean }
+      // 登録済み（二重登録防止）の人は入れない
+      const picked = json.entries.filter(e => !(e.worker_id in laborDone))
+      if (picked.length === 0) {
+        setVoiceMsg(json.failed ? '読み取れませんでした。名前を押して選んでください。' : '一覧にある名前が聞き取れませんでした。名前を押して選んでください。')
+      } else {
+        setWorkerDayType(prev => {
+          const next = { ...prev }
+          picked.forEach(e => { next[e.worker_id] = e.day_type })
+          return next
+        })
+        const names = picked.map(e => `${workers.find(w => w.id === e.worker_id)?.name ?? ''}${e.day_type === 'half' ? '（半日）' : ''}`)
+        setVoiceMsg(`${names.join('・')} を選びました。確認して「保存する」を押してください。`
+          + (json.unmatched.length ? `　※聞き取れなかった名前：${json.unmatched.join('・')}` : ''))
+      }
+    } catch {
+      setVoiceMsg('読み取りに失敗しました。名前を押して選んでください。')
+    } finally {
+      setVoiceBusy(false)
+    }
+  }
 
   const today = jstToday()
   const [wasteForm, setWasteForm] = useState({ date: today, site_id: '', waste_type_id: '', quantity: '' })
@@ -102,6 +183,8 @@ export default function EntryPage() {
     setVehicles(v ?? [])
     setRecordedVehicleIds(new Set(((le ?? []) as { vehicle_id: number }[]).map(e => e.vehicle_id)))
     setFuelPrices(fp ?? [])
+    // 確認の読み込みは入力を待たせない（失敗しても入力は普通にできる）
+    loadChecklist(supabase, Number(id)).then(setCheckState).catch(() => setCheckState(null))
   }
 
   const isFirstVehicleUse = tab === 'lease' && !!otherForm.vehicle_id && !recordedVehicleIds.has(Number(otherForm.vehicle_id))
@@ -227,6 +310,15 @@ export default function EntryPage() {
       <button onClick={() => router.back()} className="text-blue-600 text-sm mb-3">← 現場詳細</button>
       <h1 className="text-xl font-bold mb-4">記録入力</h1>
 
+      {checkState && !checkState.missingTable && undoneItems(checkState).length > 0 && (
+        <Link href={`/projects/${id}`}
+          className="block bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mb-3 text-sm text-amber-900">
+          <span className="font-semibold">着工前の確認が {undoneItems(checkState).length} 件残っています：</span>
+          {undoneItems(checkState).map(i => i.label.replace(/を.*$/, '')).join('・')}
+          <span className="block text-[11px] text-amber-700 mt-0.5">現場詳細で確認して押してください（入力はこのまま続けられます）</span>
+        </Link>
+      )}
+
       {success && (
         <div className="bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl px-3 py-2 mb-3 text-sm font-medium">保存しました ✓</div>
       )}
@@ -295,6 +387,35 @@ export default function EntryPage() {
             <label className="block text-sm font-medium mb-2">作業員を選択（複数可）</label>
             {workers.length === 0 && (
               <p className="text-sm text-gray-400">マスタページで作業員を登録してください</p>
+            )}
+
+            {/* 声で選ぶ。手袋のまま使える。結果は選択に入るだけで、保存は下のボタン */}
+            {voiceSupported && workers.length > 0 && (
+              <div className="border border-gray-200 rounded-xl p-3 mb-3 bg-gray-50">
+                <div className="flex gap-2">
+                  {!recording ? (
+                    <button type="button" onClick={startVoice} disabled={voiceBusy}
+                      className="flex-1 py-2.5 rounded-xl bg-white border border-blue-300 text-blue-700 text-sm font-medium disabled:opacity-40">
+                      🎤 声で選ぶ
+                    </button>
+                  ) : (
+                    <button type="button" onClick={stopVoice}
+                      className="flex-1 py-2.5 rounded-xl bg-red-600 text-white text-sm font-medium">
+                      ■ 話し終わった
+                    </button>
+                  )}
+                  {voiceText && !recording && (
+                    <button type="button" onClick={applyVoice} disabled={voiceBusy}
+                      className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium disabled:opacity-40">
+                      {voiceBusy ? '読み取り中...' : '読み取って選ぶ'}
+                    </button>
+                  )}
+                </div>
+                <p className="text-[11px] text-gray-500 mt-1.5">
+                  {recording ? '例：「横山と田中、全日。松尾は半日」' : voiceText ? `聞き取り：${voiceText}` : '押して、今日働いた人の名前と全日か半日かを話してください'}
+                </p>
+                {voiceMsg && <p className="text-xs text-blue-800 mt-1.5">{voiceMsg}</p>}
+              </div>
             )}
             {Object.keys(laborDone).length > 0 && (
               <p className="text-xs text-gray-500 mb-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
