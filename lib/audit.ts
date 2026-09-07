@@ -1,6 +1,6 @@
 'use client'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { readUser } from '@/lib/user'
+import { readUser, isWorker } from '@/lib/user'
 
 // 操作の記録を1行残す。失敗しても本体の処理は止めない（記録のために業務を止めない）。
 // テーブルがまだ無い環境では黙って何もしない。
@@ -16,7 +16,8 @@ export async function logAction(
   const u = readUser()
   try {
     await supabase.from('audit_log').insert({
-      actor_id: u?.id ?? null,
+      // 社長（id 0）は workers に居ないので id は残さず、名前だけ残す
+      actor_id: isWorker(u) ? u.id : null,
       actor_name: u?.name ?? null,
       action, target_table: targetTable, target_id: targetId, summary,
     })

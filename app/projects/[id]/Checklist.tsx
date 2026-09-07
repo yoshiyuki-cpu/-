@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { CHECK_ITEMS, loadChecklist, ChecklistState } from '@/lib/checklist'
-import { useDeviceUser } from '@/lib/user'
+import { useDeviceUser, isWorker } from '@/lib/user'
 
 type Worker = { id: number; name: string }
 
@@ -55,7 +55,8 @@ export default function Checklist({ projectId }: { projectId: number }) {
 
   function tap(key: string) {
     if (busy) return
-    if (user) markDone(key, user.id)
+    // 確認した人は職人から選ぶ（done_by が workers を参照するため）。社長の端末なら誰が確認したか選ぶ
+    if (isWorker(user)) markDone(key, user.id)
     else setPicking(key)
   }
 
