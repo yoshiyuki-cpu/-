@@ -8,6 +8,14 @@ import { useSyncExternalStore } from 'react'
 // なりすましは防げない。防ぐのは次の段階で、その時もこの選択の形はそのまま使う。
 export type DeviceUser = { id: number; name: string }
 
+// 社長は職人ではないので workers 表に居ない。名前の一覧に固定で出す。
+// id 0 は workers に存在しないので、workers を参照する列（audit_log.actor_id、
+// project_checks.done_by）には入れない。isWorker() で見分ける。
+export const OWNER_USER: DeviceUser = { id: 0, name: '社長' }
+export function isWorker(u: DeviceUser | null): u is DeviceUser {
+  return !!u && u.id > 0
+}
+
 const KEY = 'ryoshin_user'
 const EVENT = 'ryoshin-user-change'
 

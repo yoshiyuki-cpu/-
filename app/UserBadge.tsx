@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { useDeviceUser, setUser } from '@/lib/user'
+import { useDeviceUser, setUser, OWNER_USER } from '@/lib/user'
 
 type Worker = { id: number; name: string; is_foreman: boolean }
 
@@ -36,6 +36,11 @@ export default function UserBadge() {
               ごみ箱・完工・記録の修正などに、この名前が残ります。人に貸すときは選び直してください。
             </p>
             <div className="flex flex-col gap-1.5">
+              {/* 社長は職人ではないので一覧に無い。固定で一番上に出す */}
+              <button onClick={() => { setUser(OWNER_USER); setOpen(false) }}
+                className={`w-full text-left rounded-xl px-3 py-3 text-base border ${user?.id === OWNER_USER.id ? 'border-blue-500 bg-blue-50 font-medium' : 'border-gray-200'}`}>
+                {OWNER_USER.name}
+              </button>
               {workers.length === 0 && <p className="text-sm text-gray-400 py-4 text-center">読み込み中...</p>}
               {workers.map(w => (
                 <button key={w.id} onClick={() => { setUser({ id: w.id, name: w.name }); setOpen(false) }}
