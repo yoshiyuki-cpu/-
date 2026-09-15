@@ -25,20 +25,8 @@ export default function NotificationsPage() {
   const [status, setStatus] = useState<'idle' | 'working' | 'done' | 'error' | 'unsupported'>('idle')
   const [errorMsg, setErrorMsg] = useState('')
   // 外部連携の接続確認
-  const [slackResult, setSlackResult] = useState<string | null>(null)
   const [googleResult, setGoogleResult] = useState<string | null>(null)
-  const [testing, setTesting] = useState<'slack' | 'google' | null>(null)
-
-  async function testSlack() {
-    setTesting('slack'); setSlackResult(null)
-    try {
-      const r = await fetch('/api/slack-test', { method: 'POST' }).then(x => x.json())
-      setSlackResult(r.ok ? 'Slack に送りました。チャンネルを確認してください。'
-        : !r.configured ? 'まだ設定されていません。Vercel に SLACK_WEBHOOK_URL を入れると使えます。'
-        : `送れませんでした：${r.message}`)
-    } catch { setSlackResult('送れませんでした。') }
-    setTesting(null)
-  }
+  const [testing, setTesting] = useState<'google' | null>(null)
 
   async function testGoogle() {
     setTesting('google'); setGoogleResult(null)
@@ -154,16 +142,7 @@ export default function NotificationsPage() {
           設定は Vercel の環境変数で行います。ここでは「つながっているか」だけ確認できます。
         </p>
 
-        <div className="border border-gray-100 rounded-xl p-3 mb-2">
-          <p className="text-sm font-medium">Slack</p>
-          <p className="text-xs text-gray-500 mb-2">段取りの確定・明日の予定・振り返りの記入をチャンネルに流します。</p>
-          <button onClick={testSlack} disabled={testing !== null}
-            className="w-full border border-blue-600 text-blue-600 py-2 rounded-lg text-sm font-medium disabled:opacity-40">
-            {testing === 'slack' ? '送信中...' : 'Slack にテスト送信'}
-          </button>
-          {slackResult && <p className="text-xs mt-2 text-gray-700">{slackResult}</p>}
-        </div>
-
+        {/* Slack は 2026-09 に切り離した（社長の判断）。送る側の lib/slack.ts は SLACK_WEBHOOK_URL が無ければ何もしないので残してある */}
         <div className="border border-gray-100 rounded-xl p-3">
           <p className="text-sm font-medium">Google カレンダー</p>
           <p className="text-xs text-gray-500 mb-2">共有カレンダーの予定（着工・夜勤・見積り）を Google カレンダーにも写します。</p>

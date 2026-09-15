@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { jstToday } from '@/lib/date'
 import Checklist from './Checklist'
+import BuildingInfo from './BuildingInfo'
 import { logAction } from '@/lib/audit'
 import { useDeviceUser, isWorker } from '@/lib/user'
 
@@ -675,6 +676,9 @@ export default function ProjectDetailPage() {
           <span className="text-xs text-gray-400">本数の目安</span>
         </Link>
       </div>
+
+      {/* 建物情報（構造・階数・延床・建築年・用途・アスベスト） */}
+      <BuildingInfo project={project} onSaved={load} />
 
       {/* 上空図面 */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-4">
