@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { jstToday } from '@/lib/date'
 import Checklist from './Checklist'
 import { logAction } from '@/lib/audit'
+import { useDeviceUser, isWorker } from '@/lib/user'
 
 type SortDir = 'asc' | 'desc'
 type DeleteTarget = { table: 'waste_entries' | 'other_entries' | 'labor_entries'; id: number; label: string }
@@ -38,6 +39,7 @@ function CostBar({ label, amount, max, color }: { label: string; amount: number;
 export default function ProjectDetailPage() {
   const { id } = useParams()
   const router = useRouter()
+  const deviceUser = useDeviceUser()
   const [project, setProject] = useState<Project | null>(null)
   const [wasteEntries, setWasteEntries] = useState<WasteEntry[]>([])
   const [otherEntries, setOtherEntries] = useState<OtherEntry[]>([])
@@ -62,13 +64,13 @@ export default function ProjectDetailPage() {
   const [latestNote, setLatestNote] = useState<MeetingNote | null>(null)
   const [checkedToday, setCheckedToday] = useState(true)
   const [checkItems, setCheckItems] = useState({ danger: false, cautions: false, notices: false })
-  const [confirmerName, setConfirmerName] = useState('')
+  const [picking, setPicking] = useState(false)
   const [confirming, setConfirming] = useState(false)
 
   useEffect(() => { load() }, [id])
 
   async function load() {
-    const todayStr = new Date().toISOString().split('T')[0]
+    const todayStr = jstToday()
     const [{ data: p }, { data: we }, { data: oe }, { data: le }, { data: sr }, { data: s }, { data: wt }, { data: wk }, { data: vh }, { data: mn }, { data: mc }] = await Promise.all([
       supabase.from('projects').select('*').eq('id', id).single(),
       supabase.from('waste_entries').select('*, waste_types(name, unit, unit_price, entry_type, disposal_site_id, disposal_sites(name))').eq('project_id', id).order('date', { ascending: false }),
@@ -95,18 +97,25 @@ export default function ProjectDetailPage() {
     setLatestNote(mn ?? null)
     setCheckedToday(!!mc)
     setCheckItems({ danger: false, cautions: false, notices: false })
-    setConfirmerName('')
     setLoading(false)
   }
 
-  async function confirmMorningCheck() {
+  function tapMorningCheck() {
+    if (confirming) return
+    if (isWorker(deviceUser)) confirmMorningCheck(deviceUser.id, deviceUser.name)
+    else setPicking(true)
+  }
+
+  async function confirmMorningCheck(workerId: number | null, name: string) {
     setConfirming(true)
-    const todayStr = new Date().toISOString().split('T')[0]
+    const todayStr = jstToday()
     await supabase.from('morning_checks').insert({
-      project_id: Number(id), check_date: todayStr, checked_by: confirmerName || null,
+      project_id: Number(id), check_date: todayStr, checked_by_id: workerId, checked_by_name: name,
     })
-    setCheckedToday(true)
+    logAction(supabase, 'create', 'morning_checks', null, `${project?.name ?? ''} の朝一チェックを確認した`)
     setConfirming(false)
+    setPicking(false)
+    setCheckedToday(true)
   }
 
   async function confirmDelete() {
@@ -323,11 +332,12 @@ export default function ProjectDetailPage() {
             )}
           </div>
           <div className="mb-4">
-            <label className="block text-sm font-medium mb-1">確認した人（任意）</label>
-            <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" value={confirmerName}
-              onChange={e => setConfirmerName(e.target.value)} placeholder="例：山田" />
+            <p className="text-sm font-medium mb-1">確認する人</p>
+            <p className="text-xs text-gray-500">
+              {isWorker(deviceUser) ? `${deviceUser.name}さんの名前で残ります` : 'ボタンを押すと確認した人を選びます'}
+            </p>
           </div>
-          <button onClick={confirmMorningCheck} disabled={!allChecked || confirming}
+          <button onClick={tapMorningCheck} disabled={!allChecked || confirming}
             className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold disabled:opacity-40 transition">
             {confirming ? '確認中...' : '全て確認して現場へ進む'}
           </button>
@@ -335,6 +345,23 @@ export default function ProjectDetailPage() {
             一度確認すると、今日はこの現場を使う全員がそのまま入れます
           </p>
         </div>
+
+        {picking && (
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={() => setPicking(false)}>
+            <div className="bg-white rounded-t-2xl shadow-xl p-4 w-full max-w-md max-h-[70vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+              <h3 className="font-bold mb-3">確認したのは誰ですか？</h3>
+              <div className="flex flex-col gap-1.5">
+                {workers.map(w => (
+                  <button key={w.id} onClick={() => confirmMorningCheck(w.id, w.name)} disabled={confirming}
+                    className="w-full text-left border border-gray-200 rounded-xl px-3 py-3 text-base disabled:opacity-40">
+                    {w.name}
+                  </button>
+                ))}
+              </div>
+              <button onClick={() => setPicking(false)} className="w-full mt-3 py-2 text-sm text-gray-500">やめる</button>
+            </div>
+          </div>
+        )}
       </div>
     )
   }
