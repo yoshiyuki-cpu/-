@@ -153,6 +153,15 @@ export type MeetingNotePhoto = {
   created_at: string
 }
 
+export type MorningCheck = {
+  id: number
+  project_id: number
+  check_date: string
+  checked_by_id: number | null
+  checked_by_name: string | null
+  checked_at: string
+}
+
 export type KyPhoto = {
   id: number
   project_id: number
