@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState, useRef } from 'react'
-import { supabase, Project, WasteEntry, OtherEntry, DisposalSite, WasteType, Vehicle } from '@/lib/supabase'
+import { supabase, Project, WasteEntry, OtherEntry, DisposalSite, WasteType, Vehicle, MeetingNote } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { jstToday } from '@/lib/date'
@@ -59,11 +59,17 @@ export default function ProjectDetailPage() {
   const [uploadingAerial, setUploadingAerial] = useState(false)
   const [showAerial, setShowAerial] = useState(false)
   const aerialInputRef = useRef<HTMLInputElement>(null)
+  const [latestNote, setLatestNote] = useState<MeetingNote | null>(null)
+  const [checkedToday, setCheckedToday] = useState(true)
+  const [checkItems, setCheckItems] = useState({ danger: false, cautions: false, notices: false })
+  const [confirmerName, setConfirmerName] = useState('')
+  const [confirming, setConfirming] = useState(false)
 
   useEffect(() => { load() }, [id])
 
   async function load() {
-    const [{ data: p }, { data: we }, { data: oe }, { data: le }, { data: sr }, { data: s }, { data: wt }, { data: wk }, { data: vh }] = await Promise.all([
+    const todayStr = new Date().toISOString().split('T')[0]
+    const [{ data: p }, { data: we }, { data: oe }, { data: le }, { data: sr }, { data: s }, { data: wt }, { data: wk }, { data: vh }, { data: mn }, { data: mc }] = await Promise.all([
       supabase.from('projects').select('*').eq('id', id).single(),
       supabase.from('waste_entries').select('*, waste_types(name, unit, unit_price, entry_type, disposal_site_id, disposal_sites(name))').eq('project_id', id).order('date', { ascending: false }),
       supabase.from('other_entries').select('*, vehicles(name, category)').eq('project_id', id).order('date', { ascending: false }),
@@ -73,6 +79,8 @@ export default function ProjectDetailPage() {
       supabase.from('waste_types').select('*').order('name'),
       supabase.from('workers').select('*').order('name'),
       supabase.from('vehicles').select('*').order('name'),
+      supabase.from('meeting_notes').select('*').eq('project_id', id).order('date', { ascending: false }).limit(1).maybeSingle(),
+      supabase.from('morning_checks').select('id').eq('project_id', id).eq('check_date', todayStr).maybeSingle(),
     ])
     setProject(p)
     setNotesValue(p?.notes ?? '')
@@ -84,7 +92,21 @@ export default function ProjectDetailPage() {
     setWasteTypes((wt as any) ?? [])
     setWorkers(wk ?? [])
     setVehicles(vh ?? [])
+    setLatestNote(mn ?? null)
+    setCheckedToday(!!mc)
+    setCheckItems({ danger: false, cautions: false, notices: false })
+    setConfirmerName('')
     setLoading(false)
+  }
+
+  async function confirmMorningCheck() {
+    setConfirming(true)
+    const todayStr = new Date().toISOString().split('T')[0]
+    await supabase.from('morning_checks').insert({
+      project_id: Number(id), check_date: todayStr, checked_by: confirmerName || null,
+    })
+    setCheckedToday(true)
+    setConfirming(false)
   }
 
   async function confirmDelete() {
@@ -248,6 +270,74 @@ export default function ProjectDetailPage() {
 
   if (loading) return <p className="text-center py-10 text-gray-500">読み込み中...</p>
   if (!project) return <p className="text-center py-10 text-gray-500">現場が見つかりません</p>
+
+  const needsMorningCheck = !checkedToday && !!latestNote &&
+    !!(latestNote.danger_points || latestNote.cautions || latestNote.notices)
+  const allChecked =
+    (!latestNote?.danger_points || checkItems.danger) &&
+    (!latestNote?.cautions || checkItems.cautions) &&
+    (!latestNote?.notices || checkItems.notices)
+
+  if (needsMorningCheck) {
+    return (
+      <div>
+        <button onClick={() => router.push('/')} className="text-blue-600 text-sm mb-3 py-1">← 現場一覧</button>
+        <div className="bg-white rounded-2xl border border-amber-200 shadow-sm p-5">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-2xl">⚠️</span>
+            <h1 className="text-lg font-bold text-gray-800">朝一チェック（{project.name}）</h1>
+          </div>
+          <p className="text-sm text-gray-500 mb-4">
+            この現場を開く前に、直近の議事録（{latestNote?.date}）の内容を確認してください。
+          </p>
+          <div className="flex flex-col gap-3 mb-4">
+            {latestNote?.danger_points && (
+              <label className="flex items-start gap-3 bg-red-50 border border-red-100 rounded-xl p-3 cursor-pointer">
+                <input type="checkbox" className="mt-1 w-5 h-5 accent-red-600" checked={checkItems.danger}
+                  onChange={e => setCheckItems(c => ({ ...c, danger: e.target.checked }))} />
+                <div>
+                  <p className="text-xs font-bold text-red-600 mb-1">⚠️ 危険箇所</p>
+                  <p className="text-sm text-gray-800 whitespace-pre-wrap">{latestNote.danger_points}</p>
+                </div>
+              </label>
+            )}
+            {latestNote?.cautions && (
+              <label className="flex items-start gap-3 bg-amber-50 border border-amber-100 rounded-xl p-3 cursor-pointer">
+                <input type="checkbox" className="mt-1 w-5 h-5 accent-amber-600" checked={checkItems.cautions}
+                  onChange={e => setCheckItems(c => ({ ...c, cautions: e.target.checked }))} />
+                <div>
+                  <p className="text-xs font-bold text-amber-700 mb-1">📌 注意事項（残しの箇所など）</p>
+                  <p className="text-sm text-gray-800 whitespace-pre-wrap">{latestNote.cautions}</p>
+                </div>
+              </label>
+            )}
+            {latestNote?.notices && (
+              <label className="flex items-start gap-3 bg-blue-50 border border-blue-100 rounded-xl p-3 cursor-pointer">
+                <input type="checkbox" className="mt-1 w-5 h-5 accent-blue-600" checked={checkItems.notices}
+                  onChange={e => setCheckItems(c => ({ ...c, notices: e.target.checked }))} />
+                <div>
+                  <p className="text-xs font-bold text-blue-700 mb-1">📣 伝達事項</p>
+                  <p className="text-sm text-gray-800 whitespace-pre-wrap">{latestNote.notices}</p>
+                </div>
+              </label>
+            )}
+          </div>
+          <div className="mb-4">
+            <label className="block text-sm font-medium mb-1">確認した人（任意）</label>
+            <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" value={confirmerName}
+              onChange={e => setConfirmerName(e.target.value)} placeholder="例：山田" />
+          </div>
+          <button onClick={confirmMorningCheck} disabled={!allChecked || confirming}
+            className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold disabled:opacity-40 transition">
+            {confirming ? '確認中...' : '全て確認して現場へ進む'}
+          </button>
+          <p className="text-xs text-gray-400 mt-2 text-center">
+            一度確認すると、今日はこの現場を使う全員がそのまま入れます
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   const wasteCost = wasteEntries.filter((e: any) => e.waste_types?.entry_type === 'cost').reduce((s, e) => s + Number(e.amount), 0)
   const scrapRevenue = wasteEntries.filter((e: any) => e.waste_types?.entry_type === 'revenue').reduce((s, e) => s + Number(e.amount), 0)
