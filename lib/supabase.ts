@@ -37,6 +37,14 @@ export type Project = {
   budget_scrap_revenue: number | null
   budget_expense: number | null
   process_notes: string | null
+  // 建物情報（supabase-schema-building-info.sql）。SQL 実行前の環境では undefined になる
+  building_structure?: string | null
+  building_floors?: number | null
+  building_floor_area?: number | null
+  building_built_year?: number | null
+  building_usage?: string | null
+  building_asbestos?: string | null
+  building_notes?: string | null
   created_at: string
 }
 
