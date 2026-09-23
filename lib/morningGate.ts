@@ -6,8 +6,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 // ・この日より前の日付は止めない（始める前の記録の後入れを止めないため）
 // ・回線の都合などで確認できなかったときは止めない（圏外で人工が入れられなくなるのを避ける）
 // ・社長が合言葉で解除した日は止めない（雨で KY が撮れなかった、などの例外用）
-export const GATE_START = '2026-09-24'
-// 道具の確認は1日遅れて始める（表を作る SQL を実行してから）。表がまだ無い環境では求めない
+export const GATE_START = '2026-09-25'
+// 道具の確認も同じ日から。表がまだ無い環境（SQL 未実行）では求めない
 export const TOOLS_START = '2026-09-25'
 
 export const gateUnlockKey = (projectId: number, date: string) => `morning_gate_unlock:${projectId}:${date}`
