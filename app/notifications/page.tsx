@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import EntryReportSettings from './EntryReportSettings'
 
 type Target = { id: number; name: string; is_foreman: boolean; is_google_ads: boolean; is_x_pr: boolean }
 
@@ -135,6 +136,8 @@ export default function NotificationsPage() {
           </>
         )}
       </section>
+
+      <EntryReportSettings />
 
       <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mt-4">
         <h2 className="font-bold text-gray-700 mb-1">外部連携</h2>

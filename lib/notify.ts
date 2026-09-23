@@ -182,7 +182,8 @@ export async function sendReminderPush(supabase: SupabaseClient, workerId: numbe
 export async function sendLineMessage(lineUserId: string, text: string) {
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN
   if (!token) return
-  const res = await fetch('https://api.line.me/v2/bot/message/push', {
+  // 手元の動作確認では LINE の代わりのサーバーに向けられる（LINE_API_BASE）
+  const res = await fetch(`${process.env.LINE_API_BASE || 'https://api.line.me'}/v2/bot/message/push`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

@@ -41,6 +41,7 @@ async function runMorningReminder() {
     const lines = [
       `${t.name}さん、おはようございます。`,
       '本日の議事録・KY活動の記入をお願いします。',
+      '※KY活動と議事録を登録するまで、その現場の人工・処分代は入力できません。',
       '',
       ...t.projects.map(p => `【${p.name}】\n議事録: ${projectUrl('minutes', p.id)}\nKY活動: ${projectUrl('ky', p.id)}`),
     ]
