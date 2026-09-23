@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { supabase, DisposalSite, WasteType, Vehicle, FuelPrice, SupportCompany } from '@/lib/supabase'
 import Link from 'next/link'
 import { useDesign, setDesign } from '@/lib/design'
+import { useLayout, setLayout } from '@/lib/layout'
 
 type Worker = {
   id: number; name: string; company_name: string | null; email: string | null; is_foreman: boolean
@@ -344,13 +345,14 @@ export default function MasterPage() {
     : wasteTypes
 
   const design = useDesign()
+  const layout = useLayout()
 
   const tabClass = (t: string) =>
     `shrink-0 whitespace-nowrap px-3.5 py-2 rounded-full text-sm font-medium transition ${tab === t ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`
 
   return (
     <div>
-      <h1 className="text-xl font-bold mb-3">マスタ管理</h1>
+      <h1 className="text-xl font-bold mb-3">その他・マスタ</h1>
       {/* 横に並べると390px幅で文字が縦に割れていたので、横スクロールにして1行に収める */}
       <div className="flex gap-1.5 mb-3 overflow-x-auto pb-1 -mx-4 px-4">
         <Link href="/usage" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">📊 利用状況</Link>
@@ -360,6 +362,20 @@ export default function MasterPage() {
         <Link href="/reflection" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🔒 振り返り</Link>
         <Link href="/report" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">📈 月次レポート</Link>
         <Link href="/audit" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🧾 操作の記録</Link>
+      </div>
+
+      {/* 画面の組み立ての切り替え（2026-09）。端末ごとに効き、記録には触らない */}
+      <div className="flex items-center justify-between bg-white border border-gray-100 rounded-xl px-3 py-2 mb-2">
+        <div>
+          <p className="text-sm font-medium">ホームと下の帯</p>
+          <p className="text-[11px] text-gray-400">
+            {layout === 'classic' ? '前の画面（ホームが現場の一覧）' : '新しい画面（ホームが「今日」、下の帯が4個）'}
+          </p>
+        </div>
+        <button onClick={() => setLayout(layout === 'classic' ? 'today' : 'classic')}
+          className={`text-xs px-3 py-1.5 rounded-full border font-medium ${layout === 'classic' ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600 bg-white'}`}>
+          {layout === 'classic' ? '新しい画面にする' : '前の画面に戻す'}
+        </button>
       </div>
 
       {/* 見た目の切り替え。端末ごとに効き、記録には触らない */}

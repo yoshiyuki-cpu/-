@@ -22,6 +22,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ja" data-design="v1">
+      <head>
+        {/* 本文は読み間違えにくい UD フォント（3と8、濁点が日なたでもつぶれない）。読めなくても端末の文字で出る */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&display=swap" />
+      </head>
       <body className="min-h-screen">
         <script dangerouslySetInnerHTML={{ __html: designBootScript }} />
         <DesignProvider />

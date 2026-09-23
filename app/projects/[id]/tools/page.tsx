@@ -112,7 +112,9 @@ export default function ProjectToolsPage() {
           <section className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 mb-4">
             <p className="font-bold text-emerald-800">今朝の道具の確認 ✓</p>
             <p className="text-sm text-emerald-800 mt-1">
-              {new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: 'numeric', minute: '2-digit' }).format(new Date(todayCheck.created_at))}
+              {todayCheck.created_at && !isNaN(new Date(todayCheck.created_at).getTime())
+                ? new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: 'numeric', minute: '2-digit' }).format(new Date(todayCheck.created_at))
+                : '今日'}
               {todayCheck.checked_by_name ? `　${todayCheck.checked_by_name}` : ''}
               　現場に {todayCheck.tool_count ?? 0} 点
             </p>

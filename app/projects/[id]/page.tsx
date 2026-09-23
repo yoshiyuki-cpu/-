@@ -6,10 +6,13 @@ import Link from 'next/link'
 import { jstToday } from '@/lib/date'
 import Checklist from './Checklist'
 import BuildingInfo from './BuildingInfo'
+import ForemanAssign from './ForemanAssign'
+import { loadGate, GateState } from '@/lib/morningGate'
 import { logAction } from '@/lib/audit'
 import { useDeviceUser, isWorker } from '@/lib/user'
 
 type SortDir = 'asc' | 'desc'
+type DetailTab = 'today' | 'ledger' | 'docs'
 type DeleteTarget = { table: 'waste_entries' | 'other_entries' | 'labor_entries'; id: number; label: string }
 type Worker = { id: number; name: string; company_name: string | null }
 
@@ -67,6 +70,15 @@ export default function ProjectDetailPage() {
   const [checkItems, setCheckItems] = useState({ danger: false, cautions: false, notices: false })
   const [picking, setPicking] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  // 現場詳細のタブ。開き直しても同じタブに戻るよう、この画面の中だけで覚える
+  const [detailTab, setDetailTab] = useState<DetailTab>(() => {
+    try { const t = sessionStorage.getItem('ryoshin_detail_tab'); return t === 'ledger' || t === 'docs' ? t : 'today' } catch { return 'today' }
+  })
+  function selectTab(t: DetailTab) {
+    setDetailTab(t)
+    try { sessionStorage.setItem('ryoshin_detail_tab', t) } catch { /* 覚えられない端末では今回だけ */ }
+  }
+  const [todayGate, setTodayGate] = useState<GateState | null>(null)
 
   useEffect(() => { load() }, [id])
 
@@ -96,6 +108,7 @@ export default function ProjectDetailPage() {
     setWorkers(wk ?? [])
     setVehicles(vh ?? [])
     setLatestNote(mn ?? null)
+    loadGate(supabase, Number(id), todayStr).then(setTodayGate).catch(() => setTodayGate(null))
     setCheckedToday(!!mc)
     setCheckItems({ danger: false, cautions: false, notices: false })
     setLoading(false)
@@ -291,7 +304,7 @@ export default function ProjectDetailPage() {
   if (needsMorningCheck) {
     return (
       <div>
-        <button onClick={() => router.push('/')} className="text-blue-600 text-sm mb-3 py-1">← 現場一覧</button>
+        <button onClick={() => router.push('/projects')} className="text-blue-600 text-sm mb-3 py-1">← 現場一覧</button>
         <div className="bg-white rounded-2xl border border-amber-200 shadow-sm p-5">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-2xl">⚠️</span>
@@ -379,6 +392,13 @@ export default function ProjectDetailPage() {
   const totalCost = wasteCost + laborAmt + fuelAmt + leaseAmt + expenseAmt
   const profit = scrapRevenue - totalCost
   const isProfit = profit >= 0
+  const budgetTotal = ['budget_waste_cost', 'budget_labor', 'budget_fuel', 'budget_lease', 'budget_expense']
+    .reduce((sum, k) => sum + Number((project as unknown as Record<string, number | null>)[k] ?? 0), 0)
+  const budgetPct = budgetTotal > 0 ? Math.round((totalCost / budgetTotal) * 100) : 0
+  const todayStr = jstToday()
+  const workDays = Math.max(1, Math.round((new Date(todayStr).getTime() - new Date(project.start_date).getTime()) / 86400000) + 1)
+  const todayLabor = new Set(laborEntries.filter((e: { date: string }) => e.date === todayStr).map((e: { worker_id: number }) => e.worker_id)).size
+  const todayWaste = wasteEntries.filter(e => e.date === todayStr).length
   const maxBar = Math.max(wasteCost, laborAmt, fuelAmt, leaseAmt, expenseAmt, scrapRevenue, 1)
 
   const sortFn = (a: any, b: any) =>
@@ -591,7 +611,7 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      <button onClick={() => router.push('/')} className="text-blue-600 text-sm mb-3 py-1">← 現場一覧</button>
+      <button onClick={() => router.push('/projects')} className="text-blue-600 text-sm mb-3 py-1">← 現場一覧</button>
 
       <div className="flex justify-between items-start mb-4">
         <div>
@@ -608,10 +628,66 @@ export default function ProjectDetailPage() {
             </a>
           )}
         </div>
-        <Link href={`/projects/${id}/entry`} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-full text-sm font-semibold shadow-sm transition shrink-0">
-          + 入力
+        <Link href={`/projects/${id}/today`} className="bg-blue-900 hover:bg-blue-800 text-white px-4 py-2.5 rounded-full text-sm font-semibold shadow-sm transition shrink-0">
+          ＋ 今日の記入
         </Link>
       </div>
+
+      {/* 支出と予算の使い具合。見出しのすぐ下に1本の棒で */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-3 mb-3">
+        <div className="flex justify-between items-baseline gap-2">
+          <span className="text-xs font-bold text-gray-500">支出{budgetTotal > 0 ? `（予算 ${budgetTotal.toLocaleString()}円）` : ''}</span>
+          <span className="font-mono font-bold text-lg">{fmt(totalCost)}</span>
+        </div>
+        {budgetTotal > 0 && (
+          <>
+            <div className="h-2 rounded-full bg-gray-100 overflow-hidden mt-2">
+              <div className={`h-full rounded-full ${budgetPct > 100 ? 'bg-red-600' : budgetPct > 85 ? 'bg-amber-400' : 'bg-blue-900'}`} style={{ width: `${Math.min(budgetPct, 100)}%` }} />
+            </div>
+            <p className="text-[11px] text-gray-500 mt-1">予算の {budgetPct}% を使用{project.status === 'active' ? `　／　工期 ${workDays}日目` : ''}</p>
+          </>
+        )}
+        {budgetTotal === 0 && <p className="text-[11px] text-gray-500 mt-1">予算は「資料 → 予算・工程」で入れられます。</p>}
+      </div>
+
+      {/* 長い1枚だったのを、今日・台帳・資料の3つに分けた（2026-09） */}
+      <div className="grid grid-cols-3 gap-1 bg-gray-200/70 rounded-xl p-1 mb-3" role="tablist" aria-label="現場詳細の切り替え">
+        {([['today', '今日'], ['ledger', '台帳'], ['docs', '資料']] as [DetailTab, string][]).map(([t, label]) => (
+          <button key={t} role="tab" aria-selected={detailTab === t} onClick={() => selectTab(t)}
+            className={`py-2 rounded-lg text-sm font-bold ${detailTab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {detailTab === 'today' && (
+        <>
+          <div className="bg-white rounded-2xl border border-gray-100 p-3 mb-3">
+            <p className="text-sm font-bold text-gray-700">今日（{todayStr.slice(5).replace('-', '/')}）</p>
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {[
+                { label: 'KY写真', done: todayGate?.ky, href: `/projects/${id}/ky` },
+                { label: '議事録', done: todayGate?.minutes, href: `/projects/${id}/minutes` },
+                ...(todayGate?.toolsRequired ? [{ label: '道具', done: todayGate?.tools, href: `/projects/${id}/tools` }] : []),
+              ].map(c => (
+                <Link key={c.label} href={c.href}
+                  className={`text-xs font-bold rounded-lg border px-2 py-1.5 ${c.done ? 'bg-emerald-50 border-transparent text-emerald-700' : 'bg-amber-50 border-amber-400 text-amber-900'}`}>
+                  {c.label}{c.done ? ' ✓' : ' まだ'}
+                </Link>
+              ))}
+              <span className={`text-xs font-bold rounded-lg border px-2 py-1.5 ${todayLabor > 0 ? 'bg-emerald-50 border-transparent text-emerald-700' : 'bg-white border-gray-200 text-gray-500'}`}>人工 {todayLabor > 0 ? `${todayLabor}名` : 'まだ'}</span>
+              <span className={`text-xs font-bold rounded-lg border px-2 py-1.5 ${todayWaste > 0 ? 'bg-emerald-50 border-transparent text-emerald-700' : 'bg-white border-gray-200 text-gray-500'}`}>処分 {todayWaste > 0 ? `${todayWaste}件` : 'なし'}</span>
+            </div>
+            <Link href={`/projects/${id}/today`} className="mt-3 flex items-center justify-center min-h-12 rounded-xl bg-blue-900 text-white font-bold">
+              今日の記入をする
+            </Link>
+          </div>
+
+          <ForemanAssign projectId={Number(id)} projectName={project.name} />
+
+      {/* 着工前の確認。揃っていない間は黄色で目立たせる */}
+      <Checklist projectId={Number(id)} />
+
 
       {/* ステータス・操作ボタン */}
       <div className="flex gap-2 mb-4 flex-wrap">
@@ -628,112 +704,11 @@ export default function ProjectDetailPage() {
         </button>
       </div>
 
-      {/* 着工前の確認。揃っていない間は黄色で目立たせる */}
-      <Checklist projectId={Number(id)} />
+        </>
+      )}
 
-      {/* ナビゲーション（新デザインでは4列の小さなボタンになる。globals.css の .project-nav） */}
-      <div className="project-nav grid grid-cols-2 gap-2 mb-4">
-        <Link href={`/projects/${id}/plan`}
-          className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
-          <span className="text-2xl">📊</span>
-          <span className="font-medium text-xs text-gray-700">予算・工程</span>
-          <span className="text-xs text-gray-400">計画管理</span>
-        </Link>
-        <Link href={`/projects/${id}/scrap`}
-          className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
-          <span className="text-2xl">♻️</span>
-          <span className="font-medium text-xs text-gray-700">スクラップ</span>
-          <span className="text-xs text-gray-400">写真・伝票記録</span>
-        </Link>
-        <Link href={`/projects/${id}/minutes`}
-          className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
-          <span className="text-2xl">📋</span>
-          <span className="font-medium text-xs text-gray-700">議事録</span>
-          <span className="text-xs text-gray-400">危険箇所・注意事項</span>
-        </Link>
-        <Link href={`/projects/${id}/ky`}
-          className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
-          <span className="text-2xl">🛡️</span>
-          <span className="font-medium text-xs text-gray-700">KY活動</span>
-          <span className="text-xs text-gray-400">写真記録</span>
-        </Link>
-        <Link href={`/projects/${id}/pipes`}
-          className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
-          <span className="text-2xl">🗺️</span>
-          <span className="font-medium text-xs text-gray-700">管路図</span>
-          <span className="text-xs text-gray-400">水道・ガス・電気</span>
-        </Link>
-        <Link href={`/projects/${id}/tools`}
-          className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
-          <span className="text-2xl">🧰</span>
-          <span className="font-medium text-xs text-gray-700">使用道具</span>
-          <span className="text-xs text-gray-400">貸出・返却</span>
-        </Link>
-      </div>
-
-      {/* 建物情報（構造・階数・延床・建築年・用途・アスベスト） */}
-      <BuildingInfo project={project} onSaved={load} />
-
-      {/* 上空図面 */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-4">
-        <div className="flex justify-between items-center mb-2">
-          <h2 className="font-bold text-gray-700 text-sm">上空図面</h2>
-          <div className="flex gap-2">
-            {project.aerial_photo_url && (
-              <button onClick={() => setShowAerial(v => !v)} className="text-xs text-blue-600">
-                {showAerial ? '閉じる' : '表示'}
-              </button>
-            )}
-            <label className={`text-xs px-2 py-1 rounded border cursor-pointer ${uploadingAerial ? 'text-gray-400' : 'text-blue-600'}`}>
-              {uploadingAerial ? 'アップロード中...' : project.aerial_photo_url ? '差し替え' : 'アップロード'}
-              <input ref={aerialInputRef} type="file" accept="image/*" className="hidden"
-                disabled={uploadingAerial} onChange={handleAerialUpload} />
-            </label>
-          </div>
-        </div>
-        {!project.aerial_photo_url && (
-          <p className="text-sm text-gray-400">図面がありません</p>
-        )}
-        {project.aerial_photo_url && showAerial && (
-          <img src={project.aerial_photo_url} alt="上空図面"
-            className="w-full rounded border mt-1" />
-        )}
-        {project.aerial_photo_url && !showAerial && (
-          <p className="text-sm text-gray-500">図面あり（「表示」で確認）</p>
-        )}
-      </div>
-
-      {/* 備考欄 */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-4">
-        <div className="flex justify-between items-center mb-1">
-          <h2 className="font-bold text-gray-700 text-sm">備考・メモ</h2>
-          {!editNotes && (
-            <button onClick={() => setEditNotes(true)} className="text-xs text-blue-600">編集</button>
-          )}
-        </div>
-        {editNotes ? (
-          <div className="flex flex-col gap-2">
-            <textarea
-              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm resize-none"
-              rows={3}
-              value={notesValue}
-              onChange={e => setNotesValue(e.target.value)}
-              placeholder="特記事項、担当者名など"
-            />
-            <div className="flex gap-2">
-              <button onClick={() => { setEditNotes(false); setNotesValue(project.notes ?? '') }}
-                className="flex-1 py-1.5 border border-gray-200 rounded-xl text-sm text-gray-600">キャンセル</button>
-              <button onClick={saveNotes}
-                className="flex-1 py-1.5 bg-blue-600 text-white rounded-lg text-sm">保存</button>
-            </div>
-          </div>
-        ) : (
-          <p className="text-sm text-gray-600 whitespace-pre-wrap">
-            {project.notes || <span className="text-gray-400">なし（タップして追加）</span>}
-          </p>
-        )}
-      </div>
-
+      {detailTab === 'ledger' && (
+        <>
       {/* 集計カード */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-4">
         <div className="flex justify-between items-center mb-3">
@@ -873,6 +848,116 @@ export default function ProjectDetailPage() {
           </div>
         ))}
       </div>
+        </>
+      )}
+
+      {detailTab === 'docs' && (
+        <>
+      {/* ナビゲーション（新デザインでは4列の小さなボタンになる。globals.css の .project-nav） */}
+      <div className="project-nav grid grid-cols-2 gap-2 mb-4">
+        <Link href={`/projects/${id}/plan`}
+          className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
+          <span className="text-2xl">📊</span>
+          <span className="font-medium text-xs text-gray-700">予算・工程</span>
+          <span className="text-xs text-gray-400">計画管理</span>
+        </Link>
+        <Link href={`/projects/${id}/scrap`}
+          className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
+          <span className="text-2xl">♻️</span>
+          <span className="font-medium text-xs text-gray-700">スクラップ</span>
+          <span className="text-xs text-gray-400">写真・伝票記録</span>
+        </Link>
+        <Link href={`/projects/${id}/minutes`}
+          className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
+          <span className="text-2xl">📋</span>
+          <span className="font-medium text-xs text-gray-700">議事録</span>
+          <span className="text-xs text-gray-400">危険箇所・注意事項</span>
+        </Link>
+        <Link href={`/projects/${id}/ky`}
+          className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
+          <span className="text-2xl">🛡️</span>
+          <span className="font-medium text-xs text-gray-700">KY活動</span>
+          <span className="text-xs text-gray-400">写真記録</span>
+        </Link>
+        <Link href={`/projects/${id}/pipes`}
+          className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
+          <span className="text-2xl">🗺️</span>
+          <span className="font-medium text-xs text-gray-700">管路図</span>
+          <span className="text-xs text-gray-400">水道・ガス・電気</span>
+        </Link>
+        <Link href={`/projects/${id}/tools`}
+          className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
+          <span className="text-2xl">🧰</span>
+          <span className="font-medium text-xs text-gray-700">使用道具</span>
+          <span className="text-xs text-gray-400">貸出・返却</span>
+        </Link>
+      </div>
+
+      {/* 建物情報（構造・階数・延床・建築年・用途・アスベスト） */}
+      <BuildingInfo project={project} onSaved={load} />
+
+      {/* 上空図面 */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-4">
+        <div className="flex justify-between items-center mb-2">
+          <h2 className="font-bold text-gray-700 text-sm">上空図面</h2>
+          <div className="flex gap-2">
+            {project.aerial_photo_url && (
+              <button onClick={() => setShowAerial(v => !v)} className="text-xs text-blue-600">
+                {showAerial ? '閉じる' : '表示'}
+              </button>
+            )}
+            <label className={`text-xs px-2 py-1 rounded border cursor-pointer ${uploadingAerial ? 'text-gray-400' : 'text-blue-600'}`}>
+              {uploadingAerial ? 'アップロード中...' : project.aerial_photo_url ? '差し替え' : 'アップロード'}
+              <input ref={aerialInputRef} type="file" accept="image/*" className="hidden"
+                disabled={uploadingAerial} onChange={handleAerialUpload} />
+            </label>
+          </div>
+        </div>
+        {!project.aerial_photo_url && (
+          <p className="text-sm text-gray-400">図面がありません</p>
+        )}
+        {project.aerial_photo_url && showAerial && (
+          <img src={project.aerial_photo_url} alt="上空図面"
+            className="w-full rounded border mt-1" />
+        )}
+        {project.aerial_photo_url && !showAerial && (
+          <p className="text-sm text-gray-500">図面あり（「表示」で確認）</p>
+        )}
+      </div>
+
+      {/* 備考欄 */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-4">
+        <div className="flex justify-between items-center mb-1">
+          <h2 className="font-bold text-gray-700 text-sm">備考・メモ</h2>
+          {!editNotes && (
+            <button onClick={() => setEditNotes(true)} className="text-xs text-blue-600">編集</button>
+          )}
+        </div>
+        {editNotes ? (
+          <div className="flex flex-col gap-2">
+            <textarea
+              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm resize-none"
+              rows={3}
+              value={notesValue}
+              onChange={e => setNotesValue(e.target.value)}
+              placeholder="特記事項、担当者名など"
+            />
+            <div className="flex gap-2">
+              <button onClick={() => { setEditNotes(false); setNotesValue(project.notes ?? '') }}
+                className="flex-1 py-1.5 border border-gray-200 rounded-xl text-sm text-gray-600">キャンセル</button>
+              <button onClick={saveNotes}
+                className="flex-1 py-1.5 bg-blue-600 text-white rounded-lg text-sm">保存</button>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-gray-600 whitespace-pre-wrap">
+            {project.notes || <span className="text-gray-400">なし（タップして追加）</span>}
+          </p>
+        )}
+      </div>
+
+        </>
+      )}
     </div>
   )
 }

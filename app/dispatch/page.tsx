@@ -1,4 +1,5 @@
 'use client'
+import PlanTabs from '../PlanTabs'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase, Project, SupportCompany, DispatchGroup } from '@/lib/supabase'
 import { logAction } from '@/lib/audit'
@@ -466,6 +467,7 @@ export default function DispatchPage() {
 
   return (
     <div>
+      <PlanTabs />
       <h1 className="text-xl font-bold mb-1">段取り</h1>
       <p className="text-xs text-gray-500 mb-4">名前をタップすると行き先を変えられます。決まったら下の「職長に通知する」を押してください。</p>
 
