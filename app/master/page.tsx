@@ -1,8 +1,9 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { supabase, DisposalSite, WasteType, CompanySettings, Vehicle, ScaffoldMaterialPrice, FuelPrice, SupportCompany } from '@/lib/supabase'
+import { supabase, DisposalSite, WasteType, Vehicle, FuelPrice, SupportCompany } from '@/lib/supabase'
 import Link from 'next/link'
 import { useDesign, setDesign } from '@/lib/design'
+import { useLayout, setLayout } from '@/lib/layout'
 
 type Worker = {
   id: number; name: string; company_name: string | null; email: string | null; is_foreman: boolean
@@ -14,7 +15,7 @@ type Worker = {
 type ProjectOption = { id: number; name: string; status: 'active' | 'completed' }
 
 export default function MasterPage() {
-  const [tab, setTab] = useState<'disposal' | 'worker' | 'support' | 'vehicle' | 'scaffold' | 'fuel' | 'company'>('disposal')
+  const [tab, setTab] = useState<'disposal' | 'worker' | 'support' | 'vehicle' | 'fuel'>('disposal')
   const [sites, setSites] = useState<DisposalSite[]>([])
   const [wasteTypes, setWasteTypes] = useState<(WasteType & { disposal_sites?: DisposalSite })[]>([])
   const [workers, setWorkers] = useState<Worker[]>([])
@@ -23,9 +24,6 @@ export default function MasterPage() {
   const [newSupportName, setNewSupportName] = useState('')
   const [foremanProjectIds, setForemanProjectIds] = useState<Record<number, number[]>>({})
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
-  const [scaffoldPrices, setScaffoldPrices] = useState<ScaffoldMaterialPrice[]>([])
-  const [newScaffoldUsage, setNewScaffoldUsage] = useState('')
-  const [editingScaffoldPrice, setEditingScaffoldPrice] = useState<{ id: number; price: string } | null>(null)
   const [fuelPrices, setFuelPrices] = useState<FuelPrice[]>([])
   const [selectedSiteId, setSelectedSiteId] = useState<string>('')
   const [newSiteName, setNewSiteName] = useState('')
@@ -40,9 +38,6 @@ export default function MasterPage() {
   const [editingVehiclePrice, setEditingVehiclePrice] = useState<{ id: number; price: string } | null>(null)
   const [editingVehicleFee, setEditingVehicleFee] = useState<{ id: number; fee: string } | null>(null)
   const [editingFuelPrice, setEditingFuelPrice] = useState<{ id: number; price: string } | null>(null)
-  const [company, setCompany] = useState<CompanySettings | null>(null)
-  const [savingCompany, setSavingCompany] = useState(false)
-  const [uploadingStamp, setUploadingStamp] = useState(false)
   // マスタの名前直し。記録は名前ではなくID（内部の番号）で紐づいているので、
   // 名前を変えても人工記録・廃材記録・原価などは一切壊れない
   const [editingName, setEditingName] = useState<{ table: string; id: number; column: string; value: string } | null>(null)
@@ -50,14 +45,12 @@ export default function MasterPage() {
   useEffect(() => { loadAll() }, [])
 
   async function loadAll() {
-    const [{ data: s }, { data: w }, { data: wk }, { data: v }, { data: sp }, { data: fp }, { data: c }, { data: pj }, { data: fpj }, { data: sup }] = await Promise.all([
+    const [{ data: s }, { data: w }, { data: wk }, { data: v }, { data: fp }, { data: pj }, { data: fpj }, { data: sup }] = await Promise.all([
       supabase.from('disposal_sites').select('*').order('name'),
       supabase.from('waste_types').select('*, disposal_sites(name)').order('name'),
       supabase.from('workers').select('*').order('name'),
       supabase.from('vehicles').select('*').order('category').order('name'),
-      supabase.from('scaffold_material_prices').select('*').order('category').order('sort_order'),
       supabase.from('fuel_prices').select('*').order('fuel_type'),
-      supabase.from('company_settings').select('*').eq('id', 1).single(),
       supabase.from('projects').select('*').eq('status', 'active').order('name'),
       supabase.from('foreman_projects').select('worker_id, project_id'),
       supabase.from('support_companies').select('*').order('sort_order'),
@@ -67,9 +60,7 @@ export default function MasterPage() {
     setWorkers(wk ?? [])
     loadWorkerUsage(wk ?? [])
     setVehicles(v ?? [])
-    setScaffoldPrices(sp ?? [])
     setFuelPrices(fp ?? [])
-    setCompany(c)
     setActiveProjects((pj ?? []).filter((p: any) => !p.deleted_at))
     setSupports(sup ?? [])
     const grouped: Record<number, number[]> = {}
@@ -132,61 +123,11 @@ export default function MasterPage() {
     setWorkers(ws => ws.map(x => x.id === w.id ? { ...x, in_dispatch: next } : x))
   }
 
-  async function updateScaffoldPrice(id: number, price: string) {
-    await supabase.from('scaffold_material_prices').update({ unit_price: price ? Number(price) : null }).eq('id', id)
-    setEditingScaffoldPrice(null)
-    loadAll()
-  }
-
-  async function addScaffoldUsagePrice() {
-    if (!newScaffoldUsage) return
-    const nextOrder = Math.max(0, ...scaffoldPrices.filter(p => p.category === 'usage').map(p => p.sort_order)) + 1
-    await supabase.from('scaffold_material_prices').insert({ category: 'usage', label: newScaffoldUsage, sort_order: nextOrder })
-    setNewScaffoldUsage('')
-    loadAll()
-  }
-
-  async function deleteScaffoldUsagePrice(id: number) {
-    if (!confirm('この用途別部材の単価を削除しますか？')) return
-    await supabase.from('scaffold_material_prices').delete().eq('id', id)
-    loadAll()
-  }
-
   async function updateFuelPrice(id: number, price: string) {
     if (!price) return
     await supabase.from('fuel_prices').update({ unit_price: Number(price), updated_at: new Date().toISOString() }).eq('id', id)
     setEditingFuelPrice(null)
     loadAll()
-  }
-
-  async function saveCompany() {
-    if (!company) return
-    setSavingCompany(true)
-    await supabase.from('company_settings').update({
-      name: company.name,
-      postal_code: company.postal_code,
-      address: company.address,
-      office_name: company.office_name,
-      tel: company.tel,
-      fax: company.fax,
-      email: company.email,
-      license_no: company.license_no,
-      representative: company.representative,
-    }).eq('id', 1)
-    setSavingCompany(false)
-  }
-
-  async function handleStampUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file || !company) return
-    setUploadingStamp(true)
-    const ext = file.name.split('.').pop()
-    const path = `company/stamp.${ext}`
-    await supabase.storage.from('project-files').upload(path, file, { upsert: true })
-    const { data: urlData } = supabase.storage.from('project-files').getPublicUrl(path)
-    await supabase.from('company_settings').update({ stamp_url: urlData.publicUrl }).eq('id', 1)
-    setCompany({ ...company, stamp_url: urlData.publicUrl })
-    setUploadingStamp(false)
   }
 
   async function addSite() {
@@ -404,13 +345,14 @@ export default function MasterPage() {
     : wasteTypes
 
   const design = useDesign()
+  const layout = useLayout()
 
   const tabClass = (t: string) =>
     `shrink-0 whitespace-nowrap px-3.5 py-2 rounded-full text-sm font-medium transition ${tab === t ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`
 
   return (
     <div>
-      <h1 className="text-xl font-bold mb-3">マスタ管理</h1>
+      <h1 className="text-xl font-bold mb-3">その他・マスタ</h1>
       {/* 横に並べると390px幅で文字が縦に割れていたので、横スクロールにして1行に収める */}
       <div className="flex gap-1.5 mb-3 overflow-x-auto pb-1 -mx-4 px-4">
         <Link href="/usage" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">📊 利用状況</Link>
@@ -420,6 +362,20 @@ export default function MasterPage() {
         <Link href="/reflection" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🔒 振り返り</Link>
         <Link href="/report" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">📈 月次レポート</Link>
         <Link href="/audit" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🧾 操作の記録</Link>
+      </div>
+
+      {/* 画面の組み立ての切り替え（2026-09）。端末ごとに効き、記録には触らない */}
+      <div className="flex items-center justify-between bg-white border border-gray-100 rounded-xl px-3 py-2 mb-2">
+        <div>
+          <p className="text-sm font-medium">ホームと下の帯</p>
+          <p className="text-[11px] text-gray-400">
+            {layout === 'classic' ? '前の画面（ホームが現場の一覧）' : '新しい画面（ホームが「今日」、下の帯が4個）'}
+          </p>
+        </div>
+        <button onClick={() => setLayout(layout === 'classic' ? 'today' : 'classic')}
+          className={`text-xs px-3 py-1.5 rounded-full border font-medium ${layout === 'classic' ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600 bg-white'}`}>
+          {layout === 'classic' ? '新しい画面にする' : '前の画面に戻す'}
+        </button>
       </div>
 
       {/* 見た目の切り替え。端末ごとに効き、記録には触らない */}
@@ -441,9 +397,7 @@ export default function MasterPage() {
         <button className={tabClass('worker')} onClick={() => setTab('worker')}>作業員</button>
         <button className={tabClass('support')} onClick={() => setTab('support')}>応援先</button>
         <button className={tabClass('vehicle')} onClick={() => setTab('vehicle')}>車両・重機</button>
-        <button className={tabClass('scaffold')} onClick={() => setTab('scaffold')}>足場材料単価</button>
         <button className={tabClass('fuel')} onClick={() => setTab('fuel')}>燃料単価</button>
-        <button className={tabClass('company')} onClick={() => setTab('company')}>会社情報</button>
       </div>
 
       {tab === 'disposal' && (
@@ -814,71 +768,6 @@ export default function MasterPage() {
         </section>
       )}
 
-      {tab === 'scaffold' && (
-        <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-          <h2 className="font-bold mb-3 text-gray-700">足場材料単価</h2>
-          <p className="text-xs text-gray-500 mb-3">
-            足場計算画面（現場ごと・グローバル電卓とも共通）の資材コスト概算に使われます。単価未設定の項目は0円で計算されます。
-          </p>
-
-          <p className="text-xs font-semibold text-gray-500 mb-1">単管（長さ別・円/本）</p>
-          <div className="flex flex-col gap-1 mb-4">
-            {scaffoldPrices.filter(p => p.category === 'pipe').map(p => (
-              <div key={p.id} className="flex justify-between items-center text-sm py-2 border-b last:border-0">
-                <span>{p.label}m</span>
-                {editingScaffoldPrice?.id === p.id ? (
-                  <div className="flex items-center gap-1">
-                    <input type="number" inputMode="decimal" step="0.01" className="border border-gray-200 rounded-xl px-2 py-1 text-sm w-24"
-                      value={editingScaffoldPrice.price}
-                      onChange={e => setEditingScaffoldPrice({ ...editingScaffoldPrice, price: e.target.value })} />
-                    <span className="text-xs text-gray-500">円/本</span>
-                    <button onClick={() => updateScaffoldPrice(p.id, editingScaffoldPrice.price)} className="text-blue-600 text-xs">✓</button>
-                    <button onClick={() => setEditingScaffoldPrice(null)} className="text-gray-400 text-xs">✕</button>
-                  </div>
-                ) : (
-                  <button onClick={() => setEditingScaffoldPrice({ id: p.id, price: p.unit_price ? String(p.unit_price) : '' })}
-                    className="text-sm text-gray-700 hover:text-blue-600">
-                    {p.unit_price ? `${p.unit_price.toLocaleString()}円/本` : '単価未設定'}
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-
-          <p className="text-xs font-semibold text-gray-500 mb-1">用途別部材（円/本）</p>
-          <div className="flex gap-2 mb-3">
-            <input className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm" value={newScaffoldUsage}
-              onChange={e => setNewScaffoldUsage(e.target.value)} placeholder="新しい用途名（例：単管クランプ）" />
-            <button onClick={addScaffoldUsagePrice} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm">追加</button>
-          </div>
-          <div className="flex flex-col gap-1">
-            {scaffoldPrices.filter(p => p.category === 'usage').map(p => (
-              <div key={p.id} className="flex justify-between items-center text-sm py-2 border-b last:border-0">
-                {nameCell('scaffold_material_prices', p.id, 'label', p.label)}
-                <div className="flex items-center gap-2">
-                  {editingScaffoldPrice?.id === p.id ? (
-                    <div className="flex items-center gap-1">
-                      <input type="number" inputMode="decimal" step="0.01" className="border border-gray-200 rounded-xl px-2 py-1 text-sm w-24"
-                        value={editingScaffoldPrice.price}
-                        onChange={e => setEditingScaffoldPrice({ ...editingScaffoldPrice, price: e.target.value })} />
-                      <span className="text-xs text-gray-500">円/本</span>
-                      <button onClick={() => updateScaffoldPrice(p.id, editingScaffoldPrice.price)} className="text-blue-600 text-xs">✓</button>
-                      <button onClick={() => setEditingScaffoldPrice(null)} className="text-gray-400 text-xs">✕</button>
-                    </div>
-                  ) : (
-                    <button onClick={() => setEditingScaffoldPrice({ id: p.id, price: p.unit_price ? String(p.unit_price) : '' })}
-                      className="text-sm text-gray-700 hover:text-blue-600">
-                      {p.unit_price ? `${p.unit_price.toLocaleString()}円/本` : '単価未設定'}
-                    </button>
-                  )}
-                  <button onClick={() => deleteScaffoldUsagePrice(p.id)} className="text-gray-300 hover:text-red-400 text-xs">削除</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
       {tab === 'fuel' && (
         <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
           <h2 className="font-bold mb-3 text-gray-700">燃料単価</h2>
@@ -910,70 +799,6 @@ export default function MasterPage() {
         </section>
       )}
 
-      {tab === 'company' && company && (
-        <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-          <h2 className="font-bold mb-3 text-gray-700">会社情報（見積書に表示されます）</h2>
-          <div className="flex flex-col gap-3">
-            <div>
-              <label className="block text-sm font-medium mb-1">会社名</label>
-              <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" value={company.name}
-                onChange={e => setCompany({ ...company, name: e.target.value })} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">郵便番号</label>
-              <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" value={company.postal_code ?? ''}
-                onChange={e => setCompany({ ...company, postal_code: e.target.value })} placeholder="例：700-0000" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">住所</label>
-              <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" value={company.address ?? ''}
-                onChange={e => setCompany({ ...company, address: e.target.value })} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">事務所名（任意）</label>
-              <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" value={company.office_name ?? ''}
-                onChange={e => setCompany({ ...company, office_name: e.target.value })} placeholder="例：豊浜事務所B101" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-medium mb-1">電話番号</label>
-                <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" value={company.tel ?? ''}
-                  onChange={e => setCompany({ ...company, tel: e.target.value })} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">FAX番号</label>
-                <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" value={company.fax ?? ''}
-                  onChange={e => setCompany({ ...company, fax: e.target.value })} />
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Mailアドレス</label>
-              <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" value={company.email ?? ''}
-                onChange={e => setCompany({ ...company, email: e.target.value })} placeholder="例：info@example.com" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">建設業許可番号</label>
-              <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" value={company.license_no ?? ''}
-                onChange={e => setCompany({ ...company, license_no: e.target.value })} placeholder="例：岡山県知事許可（般-6）第00000号" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">代表者名</label>
-              <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" value={company.representative ?? ''}
-                onChange={e => setCompany({ ...company, representative: e.target.value })} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">印鑑（ハンコ）画像</label>
-              {company.stamp_url && <img src={company.stamp_url} alt="印" className="w-20 h-20 object-contain mb-2 border rounded" />}
-              <input type="file" accept="image/*" onChange={handleStampUpload} disabled={uploadingStamp} className="text-sm" />
-              {uploadingStamp && <p className="text-xs text-gray-500 mt-1">アップロード中...</p>}
-            </div>
-            <button onClick={saveCompany} disabled={savingCompany}
-              className="bg-blue-600 text-white py-2 rounded-lg text-sm font-medium disabled:opacity-50">
-              {savingCompany ? '保存中...' : '保存する'}
-            </button>
-          </div>
-        </section>
-      )}
     </div>
   )
 }

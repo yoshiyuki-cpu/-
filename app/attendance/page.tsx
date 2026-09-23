@@ -1,4 +1,5 @@
 'use client'
+import PlanTabs from '../PlanTabs'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
@@ -71,6 +72,7 @@ export default function AttendancePage() {
 
   return (
     <div>
+      <PlanTabs />
       <h1 className="text-xl font-bold mb-4">出面集計表</h1>
 
       {/* 月選択 */}

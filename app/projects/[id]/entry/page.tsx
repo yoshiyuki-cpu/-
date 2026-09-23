@@ -6,6 +6,8 @@ import Link from 'next/link'
 import { jstToday } from '@/lib/date'
 import { loadChecklist, undoneItems, ChecklistState } from '@/lib/checklist'
 import { isOffline, isNetworkError, enqueue } from '@/lib/offlineQueue'
+import { loadGate, gateOpen, GateState } from '@/lib/morningGate'
+import MorningGateBlock from '../MorningGateBlock'
 
 type Tab = 'waste' | 'labor' | 'fuel' | 'lease' | 'expense'
 type Worker = { id: number; name: string; company_name: string | null }
@@ -206,6 +208,27 @@ export default function EntryPage() {
   useEffect(() => { loadMaster() }, [])
   useEffect(() => { loadLaborDone() }, [id, laborDate])
 
+  // 朝の KY活動・議事録が済んでいるか。廃材と人工の日付ごとに確かめる（済むまで入力させない）
+  const [gates, setGates] = useState<Record<string, GateState>>({})
+  const [projectName, setProjectName] = useState('')
+  async function refreshGate(date: string) {
+    const g = await loadGate(supabase, Number(id), date)
+    setGates(prev => ({ ...prev, [date]: g }))
+  }
+  useEffect(() => {
+    supabase.from('projects').select('name').eq('id', Number(id)).limit(1)
+      .then(({ data }) => setProjectName((data?.[0] as { name?: string } | undefined)?.name ?? ''))
+  }, [id])
+  useEffect(() => {
+    loadGate(supabase, Number(id), wasteForm.date).then(g => setGates(prev => ({ ...prev, [g.date]: g })))
+  }, [id, wasteForm.date])
+  useEffect(() => {
+    if (laborDate === wasteForm.date) return
+    loadGate(supabase, Number(id), laborDate).then(g => setGates(prev => ({ ...prev, [g.date]: g })))
+  }, [id, laborDate, wasteForm.date])
+  // null = 確認中
+  const gateFor = (date: string): GateState | null => gates[date] ?? null
+
   const isFirstVehicleUse = tab === 'lease' && !!otherForm.vehicle_id && !recordedVehicleIds.has(Number(otherForm.vehicle_id))
   const selectedVehicle = vehicles.find(v => String(v.id) === otherForm.vehicle_id)
 
@@ -233,6 +256,9 @@ export default function EntryPage() {
   async function saveWaste(e: React.FormEvent) {
     e.preventDefault()
     if (!wasteForm.waste_type_id || !wasteForm.quantity) return
+    // 念のため保存の直前にも確かめる（別の端末で KY写真を消した、など）
+    const wg = await loadGate(supabase, Number(id), wasteForm.date)
+    if (!gateOpen(wg)) { setGates(prev => ({ ...prev, [wasteForm.date]: wg })); return }
     setSaving(true)
     const result = await insertOrQueue('waste_entries', [{
       project_id: Number(id),
@@ -251,6 +277,8 @@ export default function EntryPage() {
   async function saveLabor(e: React.FormEvent) {
     e.preventDefault()
     if (Object.keys(workerDayType).length === 0) return
+    const lg = await loadGate(supabase, Number(id), laborDate)
+    if (!gateOpen(lg)) { setGates(prev => ({ ...prev, [laborDate]: lg })); return }
     setSaving(true)
     // 保存を押す直前にもう一度DBを見る。別の職長が同じ日を入れていた場合に重ねないため。
     // 圏外ではこの確認ができないので、画面で読めていた分（laborDone）だけで判断する
@@ -359,7 +387,19 @@ export default function EntryPage() {
         <button className={tabClass('expense')} onClick={() => setTab('expense')}>経費</button>
       </div>
 
-      {tab === 'waste' && (
+      {(tab === 'waste' || tab === 'labor') && (() => {
+        const date = tab === 'waste' ? wasteForm.date : laborDate
+        const g = gateFor(date)
+        if (!g) return <p className="text-center py-10 text-gray-500">朝の KY活動・議事録を確認中...</p>
+        if (gateOpen(g)) return null
+        return (
+          <MorningGateBlock projectId={Number(id)} projectName={projectName} gate={g} date={date}
+            onDateChange={d => tab === 'waste' ? setWasteForm({ ...wasteForm, date: d }) : setLaborDate(d)}
+            onUnlocked={() => refreshGate(date)} />
+        )
+      })()}
+
+      {tab === 'waste' && gateFor(wasteForm.date) && gateOpen(gateFor(wasteForm.date)!) && (
         <form onSubmit={saveWaste} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex flex-col gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">日付</label>
@@ -404,7 +444,7 @@ export default function EntryPage() {
         </form>
       )}
 
-      {tab === 'labor' && (
+      {tab === 'labor' && gateFor(laborDate) && gateOpen(gateFor(laborDate)!) && (
         <form onSubmit={saveLabor} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex flex-col gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">日付</label>

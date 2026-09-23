@@ -53,7 +53,9 @@ export default function LineReportsPage() {
       setMessage(`${pname} に ${inserted}件 入れました。${skippedLabor.length ? `${skippedLabor.join('、')} は同じ日に登録済みのため重ねていません。` : ''}`)
     } catch (e) {
       const msg = e instanceof Error ? e.message : ''
-      setMessage(msg === 'no-column'
+      setMessage(msg.startsWith('gate:')
+        ? `この日の${msg.slice(5)}がまだなので、人工・処分代は入れられません。先に現場の KY活動・議事録を登録してください。`
+        : msg === 'no-column'
         ? 'LINE報告の準備がまだです。Supabaseで supabase-schema-line-reports.sql を実行してください。'
         : '台帳に入れられませんでした。もう一度お試しください。')
     }

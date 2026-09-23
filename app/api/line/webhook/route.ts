@@ -3,6 +3,8 @@ import Anthropic from '@anthropic-ai/sdk'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { jstToday } from '@/lib/date'
+import { projectUrl } from '@/lib/notify'
+import { OWNER_LINE_LINK_CODE_KEY, OWNER_LINE_USER_ID_KEY } from '@/lib/entryReport'
 import { loadNameCtx, sanitizeParsed, summaryLines, hasEntries, registerParsed, cancelReport, fmtDate, NameCtx, Parsed } from '@/lib/lineReport'
 
 // LINE 公式アカウントの Webhook。
@@ -91,7 +93,15 @@ async function handleLinkCode(event: LineEvent, code: string): Promise<boolean> 
   const userId = event.source?.userId
   if (!userId) return false
   const { data: worker } = await supabase.from('workers').select('id, name').eq('line_link_code', code).maybeSingle()
-  if (!worker) return false
+  if (!worker) {
+    // 社長は作業員の表に居ないので、社長用の連携コードは app_settings に置いてある
+    const { data: owner } = await supabase.from('app_settings').select('value').eq('key', OWNER_LINE_LINK_CODE_KEY).maybeSingle()
+    if (!owner?.value || owner.value !== code) return false
+    await supabase.from('app_settings').upsert({ key: OWNER_LINE_USER_ID_KEY, value: userId, updated_at: new Date().toISOString() })
+    await supabase.from('app_settings').upsert({ key: OWNER_LINE_LINK_CODE_KEY, value: null, updated_at: new Date().toISOString() })
+    if (event.replyToken) await reply(event.replyToken, '社長として連携しました。毎日19時30分の「現場の記入状況」をこちらに送ります。')
+    return true
+  }
   await supabase.from('workers').update({ line_user_id: userId, line_link_code: null }).eq('id', worker.id)
   if (event.replyToken) await reply(event.replyToken, `${worker.name}さんとして連携しました。今後、朝夕のリマインダーをこちらに送ります。`)
   return true
@@ -178,7 +188,10 @@ async function handleReport(event: LineEvent, text: string): Promise<void> {
     const msg = e instanceof Error ? e.message : String(e)
     console.error('line report register failed:', msg)
     if (event.replyToken) {
-      await reply(event.replyToken, msg === 'no-column'
+      const project = ctx.projects.find(p => p.id === parsed.project_id)?.name ?? ''
+      await reply(event.replyToken, msg.startsWith('gate:')
+        ? `${project}（${fmtDate(parsed.date)}）の${msg.slice(5)}がまだなので、人工・処分代は台帳に入れていません。\n先に KY活動と議事録を登録してから、アプリの「LINE報告」で登録してください。\n${projectUrl('ky', parsed.project_id!)}`
+        : msg === 'no-column'
         ? '受け付けましたが、台帳の準備がまだです（Supabase で supabase-schema-line-reports.sql を実行してください）。アプリの「LINE報告」に残しています。'
         : '受け付けましたが、台帳に入れられませんでした。アプリの「LINE報告」から登録してください。')
     }
