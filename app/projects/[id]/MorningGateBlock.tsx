@@ -6,7 +6,7 @@ import { GateState, gateUnlockKey, gateMissing } from '@/lib/morningGate'
 import { hashPasscode, ADMIN_SCOPE, ADMIN_PASSCODE_KEY } from '@/lib/passcode'
 import { logAction } from '@/lib/audit'
 
-// 入力画面で、朝の KY活動・議事録が済むまで人工・処分代の欄の代わりに出す案内。
+// 入力画面で、朝の KY活動・議事録・道具の確認が済むまで人工・処分代の欄の代わりに出す案内。
 // 日付は変えられる（前の日の入れ忘れを入れるため。その日の KY・議事録があれば入れられる）。
 export default function MorningGateBlock({
   projectId, projectName, gate, date, onDateChange, onUnlocked,
@@ -44,7 +44,7 @@ export default function MorningGateBlock({
       .upsert({ key: gateUnlockKey(projectId, date), value: `社長（${stamp}）`, updated_at: new Date().toISOString() })
     setBusy(false)
     if (error) { setMsg('解除できませんでした。もう一度お試しください。'); return }
-    logAction(supabase, 'edit', 'projects', projectId, `${projectName} の ${m}/${d} の入力制限を解除した（KY・議事録なし）`)
+    logAction(supabase, 'edit', 'projects', projectId, `${projectName} の ${m}/${d} の入力制限を解除した（${gateMissing(gate)}なし）`)
     setPasscode('')
     onUnlocked()
   }
@@ -67,11 +67,12 @@ export default function MorningGateBlock({
       <div>
         <p className="font-bold text-amber-900">{m}/{d} の{gateMissing(gate)}がまだです</p>
         <p className="text-sm text-amber-900 mt-1">
-          朝の KY活動と議事録を登録すると、人工・処分代を入力できるようになります。
+          朝の KY活動・議事録{gate.toolsRequired ? '・道具の確認' : ''}が済むと、人工・処分代を入力できるようになります。
         </p>
       </div>
       {row(gate.ky, 'KY活動（写真）', `/projects/${projectId}/ky`)}
       {row(gate.minutes, '議事録', `/projects/${projectId}/minutes`)}
+      {gate.toolsRequired && row(gate.tools, '道具の確認', `/projects/${projectId}/tools`)}
       <p className="text-xs text-amber-800">燃料代・車両代・経費は、このまま入力できます。</p>
 
       {!showUnlock ? (

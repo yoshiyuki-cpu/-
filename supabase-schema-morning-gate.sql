@@ -17,3 +17,18 @@ update workers set receives_entry_report = true where name like '%難波%';
 -- 入力画面を開くたびに「今日のKY・議事録があるか」を引くので、引きやすくしておく
 create index if not exists ky_photos_project_date_idx on ky_photos (project_id, date);
 create index if not exists meeting_notes_project_date_idx on meeting_notes (project_id, date);
+
+-- 3) 朝の道具の確認（2026-09 追加）。現場ごと・日ごとに「今日の道具を確かめた」を1行残す。
+--    KY活動・議事録と同じく、これが済むまで人工・処分代は入力できない。
+--    1現場1日1行（押し直しても増えない）。現場や作業員を消しても記録は残す。
+create table if not exists tool_checks (
+  id serial primary key,
+  project_id integer references projects(id) on delete set null,
+  date date not null,
+  checked_by_id integer references workers(id) on delete set null,
+  checked_by_name text,
+  tool_count integer,              -- 確認したとき現場に出ていた道具の点数
+  created_at timestamptz default now(),
+  unique (project_id, date)
+);
+create index if not exists tool_checks_date_idx on tool_checks (date);

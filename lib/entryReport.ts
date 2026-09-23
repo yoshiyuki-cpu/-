@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { sendReminderEmail, sendReminderPush, sendLineMessage } from '@/lib/notify'
 import { jstToday } from '@/lib/date'
 import { REFLECTION_NOTIFY_EMAIL_KEY } from '@/lib/passcode'
-import { GATE_START } from '@/lib/morningGate'
+import { GATE_START, TOOLS_START } from '@/lib/morningGate'
 
 // 夕方の「現場の記入状況」の報告。毎日19:30（夕方の記入リマインド17:30の後）に、
 // 社長と、印（workers.receives_entry_report）を付けた人（難波君）にだけ送る。
@@ -20,6 +20,8 @@ export type SiteStatus = {
   name: string
   ky: boolean
   minutes: boolean
+  tools: boolean         // 朝の道具の確認
+  toolsRequired: boolean // 道具の確認を求める日か（表が無い環境・始まる前は false）
   labor: number     // 人数
   waste: number     // 件数
   other: number     // 件数
@@ -27,7 +29,7 @@ export type SiteStatus = {
 }
 
 export async function collectSiteStatus(supabase: SupabaseClient, date: string): Promise<SiteStatus[]> {
-  const [{ data: pj }, { data: ky }, { data: mn }, { data: lb }, { data: ws }, { data: ot }, { data: un }] = await Promise.all([
+  const [{ data: pj }, { data: ky }, { data: mn }, { data: lb }, { data: ws }, { data: ot }, { data: un }, tc] = await Promise.all([
     supabase.from('projects').select('*').order('name'),
     supabase.from('ky_photos').select('project_id').eq('date', date),
     supabase.from('meeting_notes').select('project_id').eq('date', date),
@@ -35,10 +37,12 @@ export async function collectSiteStatus(supabase: SupabaseClient, date: string):
     supabase.from('waste_entries').select('project_id').eq('date', date),
     supabase.from('other_entries').select('project_id').eq('date', date),
     supabase.from('app_settings').select('key').like('key', `morning_gate_unlock:%:${date}`),
+    supabase.from('tool_checks').select('project_id').eq('date', date),
   ])
+  const toolsRequired = date >= TOOLS_START && !tc.error
   const ids = (rows: unknown[] | null) => (rows ?? []).map(r => (r as { project_id: number }).project_id)
   const count = (list: number[], id: number) => list.filter(x => x === id).length
-  const kyIds = ids(ky), mnIds = ids(mn), wsIds = ids(ws), otIds = ids(ot)
+  const kyIds = ids(ky), mnIds = ids(mn), wsIds = ids(ws), otIds = ids(ot), tcIds = ids(tc.data ?? [])
   const unlockedIds = (un ?? []).map(r => Number(String((r as { key: string }).key).split(':')[1]))
   // 進行中の現場だけ（ごみ箱・完了は除く。deleted_at は列が無い環境もあるので JS 側で見る）
   const active = (pj ?? []).filter((p: { status?: string; deleted_at?: string | null }) => p.status === 'active' && !p.deleted_at)
@@ -47,6 +51,8 @@ export async function collectSiteStatus(supabase: SupabaseClient, date: string):
     name: p.name,
     ky: kyIds.includes(p.id),
     minutes: mnIds.includes(p.id),
+    tools: tcIds.includes(p.id),
+    toolsRequired,
     labor: new Set((lb ?? []).filter((r: { project_id: number }) => r.project_id === p.id).map((r: { worker_id: number }) => r.worker_id)).size,
     waste: count(wsIds, p.id),
     other: count(otIds, p.id),
@@ -54,13 +60,13 @@ export async function collectSiteStatus(supabase: SupabaseClient, date: string):
   }))
 }
 
-// 記入済み：KY活動・議事録・人工がそろっている（処分代は毎日出るとは限らないので条件にしない）
+// 記入済み：KY活動・議事録・（求める日は）道具の確認・人工がそろっている（処分代は毎日出るとは限らないので条件にしない）
 // 記録なし：何ひとつ入っていない（休工の日もある）
 // 抜けあり：それ以外
 export function classify(s: SiteStatus): 'done' | 'missing' | 'none' {
-  const any = s.ky || s.minutes || s.labor > 0 || s.waste > 0 || s.other > 0
+  const any = s.ky || s.minutes || s.tools || s.labor > 0 || s.waste > 0 || s.other > 0
   if (!any) return 'none'
-  if (s.ky && s.minutes && s.labor > 0) return 'done'
+  if (s.ky && s.minutes && (s.tools || !s.toolsRequired) && s.labor > 0) return 'done'
   return 'missing'
 }
 
@@ -73,7 +79,7 @@ export function buildEntryReportLines(statuses: SiteStatus[], date: string, time
   const done = statuses.filter(s => classify(s) === 'done')
   const none = statuses.filter(s => classify(s) === 'none')
   const detail = (s: SiteStatus) =>
-    `KY${mark(s.ky)} 議事録${mark(s.minutes)} 人工${s.labor > 0 ? `${s.labor}名` : '×'} 処分${s.waste > 0 ? `${s.waste}件` : 'なし'}${s.other > 0 ? ` 経費${s.other}件` : ''}${s.unlocked ? '（社長が解除）' : ''}`
+    `KY${mark(s.ky)} 議事録${mark(s.minutes)}${s.toolsRequired ? ` 道具${mark(s.tools)}` : ''} 人工${s.labor > 0 ? `${s.labor}名` : '×'} 処分${s.waste > 0 ? `${s.waste}件` : 'なし'}${s.other > 0 ? ` 経費${s.other}件` : ''}${s.unlocked ? '（社長が解除）' : ''}`
 
   const lines = [`📋 ${m}/${d}(${wd}) 現場の記入状況（${timeLabel}時点）`, '']
   if (missing.length) {
@@ -90,7 +96,7 @@ export function buildEntryReportLines(statuses: SiteStatus[], date: string, time
     lines.push(`■ 今日の記録なし（休工？） ${none.length}`, `　${none.map(s => s.name).join('、')}`, '')
   }
   if (!statuses.length) lines.push('進行中の現場がありません。', '')
-  if (date >= GATE_START) lines.push('※KY活動・議事録が無い現場は、人工・処分代を入力できない設定です。')
+  if (date >= GATE_START) lines.push(`※KY活動・議事録${date >= TOOLS_START ? '・道具の確認' : ''}が済んでいない現場は、人工・処分代を入力できない設定です。`)
   lines.push(`アプリ：${APP_URL}`)
   return lines
 }

@@ -30,7 +30,7 @@ function ReportInner() {
     setYear(d.getFullYear()); setMonth(d.getMonth() + 1)
   }
 
-  // 見積書と同じやり方（html2canvas-pro + jspdf）。日本語フォントを埋め込まずに済む
+  // html2canvas-pro + jspdf で画面をそのまま PDF にする。日本語フォントを埋め込まずに済む
   async function savePdf() {
     if (!sheetRef.current) return
     setSaving(true)

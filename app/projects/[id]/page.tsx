@@ -669,12 +669,6 @@ export default function ProjectDetailPage() {
           <span className="font-medium text-xs text-gray-700">使用道具</span>
           <span className="text-xs text-gray-400">貸出・返却</span>
         </Link>
-        <Link href={`/projects/${id}/scaffold`}
-          className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col items-center gap-1 hover:shadow-md transition active:scale-[0.98]">
-          <span className="text-2xl">📐</span>
-          <span className="font-medium text-xs text-gray-700">足場計算</span>
-          <span className="text-xs text-gray-400">本数の目安</span>
-        </Link>
       </div>
 
       {/* 建物情報（構造・階数・延床・建築年・用途・アスベスト） */}
