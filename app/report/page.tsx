@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useRef, useState, Suspense } from 'react'
+import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { jstToday } from '@/lib/date'
@@ -128,6 +129,7 @@ function ReportInner() {
             ))}
           </div>
           <p className="text-[10px] text-gray-400 mt-4">金額は円・税込。日別の費用・現場詳細の集計と同じ計算です。</p>
+          <Link href={`/disposal`} className="no-print block text-xs text-blue-700 underline mt-2">処分場ごとの月の合計を見る →</Link>
         </div>
       )}
     </div>

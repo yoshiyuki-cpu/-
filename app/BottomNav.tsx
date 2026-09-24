@@ -10,7 +10,7 @@ const TODAY_ITEMS: Item[] = [
   { href: '/', label: '今日', icon: '☀️', match: ['/'] },
   { href: '/projects', label: '現場', icon: '🏗️', match: ['/projects'] },
   { href: '/calendar', label: '予定', icon: '📅', match: ['/calendar', '/dispatch', '/attendance'] },
-  { href: '/master', label: 'その他', icon: '⚙️', match: ['/master', '/notifications', '/reflection', '/line-reports', '/report', '/usage', '/audit', '/tools'] },
+  { href: '/master', label: 'その他', icon: '⚙️', match: ['/master', '/notifications', '/reflection', '/line-reports', '/report', '/disposal', '/usage', '/audit', '/tools'] },
 ]
 
 // 前の画面（マスタで戻した端末）。やる事・見積・足場は外した
