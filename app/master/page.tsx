@@ -361,7 +361,7 @@ export default function MasterPage() {
         <Link href="/line-reports" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">💬 LINE報告</Link>
         <Link href="/reflection" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🔒 振り返り</Link>
         <Link href="/report" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">📈 月次レポート</Link>
-        <Link href="/disposal" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🚛 処分場ごとの合計</Link>
+        <Link href="/disposal" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🚛 処分場・スクラップの合計</Link>
         <Link href="/audit" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🧾 操作の記録</Link>
       </div>
 
