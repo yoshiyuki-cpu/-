@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { jstToday } from '@/lib/date'
 
-// 処分場ごとの月の合計金額（2026-09 社長の依頼）。
+// 処分場ごとの月の合計金額と、スクラップの売上の月の合計（2026-09 社長の依頼）。
 // 処分場からの請求と突き合わせられるように、処分場 → 廃材の種類 → 現場 の順に内訳を出す。
 // 買取（entry_type = revenue：鉄くずなど）は支払いと分けて出す。
 // 金額は入力のときに「単価 × 数量」で決まった記録の金額をそのまま足している（単価を後で変えても過去は変わらない）。
@@ -17,6 +17,25 @@ type Row = {
   waste_type_id: number
 }
 type WT = { id: number; name: string; unit: string; entry_type: 'cost' | 'revenue'; disposal_site_id: number }
+// スクラップの売上（現場 → スクラップの画面で伝票ごとに入れたもの）。items は品目の JSON か、手入力の文字
+type ScrapRow = { project_id: number; date: string; items: string | null; amount: number }
+
+// 伝票の品目ごとの金額。品目が読めない伝票や、品目の合計が伝票の合計と合わないときは差を「品目なし」に入れる
+function scrapItems(r: ScrapRow): { name: string; amount: number }[] {
+  const total = Number(r.amount) || 0
+  let list: { name: string; amount: number }[] = []
+  try {
+    const parsed = r.items ? JSON.parse(r.items) : []
+    if (Array.isArray(parsed)) {
+      list = parsed.filter(i => i && typeof i.name === 'string').map(i => ({ name: i.name.trim() || '品目なし', amount: Number(i.amount) || 0 }))
+    }
+  } catch {
+    if (r.items?.trim()) list = [{ name: r.items.trim(), amount: total }]
+  }
+  const sum = list.reduce((s, i) => s + i.amount, 0)
+  if (Math.round(total - sum) !== 0) list.push({ name: '品目なし', amount: total - sum })
+  return list
+}
 
 const TREND_MONTHS = 6
 
@@ -34,14 +53,14 @@ const yen = (n: number) => `${Math.round(n).toLocaleString()}円`
 const qtyText = (q: number) => (Math.round(q * 1000) / 1000).toLocaleString()
 
 // 1回の問い合わせは最大1000行なので、無くなるまで続きを取る（現場一覧と同じやり方）
-async function fetchRows(from: string, to: string): Promise<Row[]> {
+async function fetchRows<T>(table: string, columns: string, from: string, to: string): Promise<T[]> {
   const PAGE = 1000
-  const rows: Row[] = []
+  const rows: T[] = []
   for (let i = 0; ; i += PAGE) {
-    const { data } = await supabase.from('waste_entries')
-      .select('project_id, date, quantity, amount, waste_type_id')
+    const { data } = await supabase.from(table)
+      .select(columns)
       .gte('date', from).lt('date', to).order('id').range(i, i + PAGE - 1)
-    const chunk = (data ?? []) as Row[]
+    const chunk = (data ?? []) as T[]
     rows.push(...chunk)
     if (chunk.length < PAGE) break
   }
@@ -52,6 +71,7 @@ export default function DisposalMonthlyPage() {
   const [ty, tm] = jstToday().split('-').map(Number)
   const [ym, setYm] = useState({ y: ty, m: tm })
   const [rows, setRows] = useState<Row[] | null>(null)
+  const [scrap, setScrap] = useState<ScrapRow[]>([])
   const [types, setTypes] = useState<WT[]>([])
   const [sites, setSites] = useState<{ id: number; name: string }[]>([])
   const [projects, setProjects] = useState<Record<number, string>>({})
@@ -66,13 +86,15 @@ export default function DisposalMonthlyPage() {
     const from = monthRange(start.y, start.m).from
     const to = monthRange(ym.y, ym.m).to
     Promise.all([
-      fetchRows(from, to),
+      fetchRows<Row>('waste_entries', 'project_id, date, quantity, amount, waste_type_id', from, to),
+      fetchRows<ScrapRow>('scrap_records', 'project_id, date, items, amount', from, to),
       supabase.from('waste_types').select('id, name, unit, entry_type, disposal_site_id'),
       supabase.from('disposal_sites').select('id, name').order('name'),
       supabase.from('projects').select('id, name'),
-    ]).then(([r, { data: wt }, { data: ds }, { data: pj }]) => {
+    ]).then(([r, sr, { data: wt }, { data: ds }, { data: pj }]) => {
       if (cancelled) return
       setRows(r)
+      setScrap(sr)
       setTypes((wt ?? []) as WT[])
       setSites((ds ?? []) as { id: number; name: string }[])
       const names: Record<number, string> = {}
@@ -112,9 +134,24 @@ export default function DisposalMonthlyPage() {
     return [...bySite.values()].sort((a, b) => b.pay - a.pay)
   }, [rows, ym.y, ym.m, typeById])
 
+  // 表示中の月のスクラップ売上：品目別・現場別
+  const scrapMonth = useMemo(() => {
+    const { from, to } = monthRange(ym.y, ym.m)
+    const items = new Map<string, number>()
+    const byProject = new Map<number, number>()
+    let total = 0, count = 0
+    for (const r of scrap) {
+      if (r.date < from || r.date >= to) continue
+      total += Number(r.amount); count++
+      byProject.set(r.project_id, (byProject.get(r.project_id) ?? 0) + Number(r.amount))
+      for (const i of scrapItems(r)) items.set(i.name, (items.get(i.name) ?? 0) + i.amount)
+    }
+    return { total, count, items, byProject }
+  }, [scrap, ym.y, ym.m])
+
   // 過去6か月の推移（処分場 × 月、支払いのみ）
   const trend = useMemo(() => {
-    if (!rows) return { months: [] as { y: number; m: number }[], table: new Map<number, number[]>() }
+    if (!rows) return { months: [] as { y: number; m: number }[], table: new Map<number, number[]>(), scrapRow: [] as number[] }
     // 新しい月を左に（スマホでは右側が画面の外に出るので、表示中の月が最初に見えるように）
     const months = Array.from({ length: TREND_MONTHS }, (_, i) => shiftMonth(ym.y, ym.m, -i))
     const table = new Map<number, number[]>()
@@ -128,8 +165,14 @@ export default function DisposalMonthlyPage() {
       if (!table.has(siteId)) table.set(siteId, Array(TREND_MONTHS).fill(0))
       table.get(siteId)![idx] += Number(r.amount)
     }
-    return { months, table }
-  }, [rows, ym.y, ym.m, typeById])
+    const scrapRow = Array(TREND_MONTHS).fill(0) as number[]
+    for (const r of scrap) {
+      const [y, m] = r.date.split('-').map(Number)
+      const idx = months.findIndex(x => x.y === y && x.m === m)
+      if (idx >= 0) scrapRow[idx] += Number(r.amount)
+    }
+    return { months, table, scrapRow }
+  }, [rows, scrap, ym.y, ym.m, typeById])
 
   const loading = rows === null || loadedFor !== key
   const totalPay = monthly.reduce((s, x) => s + x.pay, 0)
@@ -139,8 +182,8 @@ export default function DisposalMonthlyPage() {
   return (
     <div className="flex flex-col gap-3">
       <div>
-        <h1 className="text-xl font-bold">処分場ごとの月の合計</h1>
-        <p className="text-xs text-gray-500 mt-1">処分場からの請求と突き合わせるための画面です。入力された廃材の記録を、処分場ごとに足しています。</p>
+        <h1 className="text-xl font-bold">処分場・スクラップの月の合計</h1>
+        <p className="text-xs text-gray-500 mt-1">処分場からの請求や、スクラップの伝票と突き合わせるための画面です。入力された廃材とスクラップの記録を、月ごとに足しています。</p>
       </div>
 
       <div className="flex items-center justify-between">
@@ -161,14 +204,22 @@ export default function DisposalMonthlyPage() {
             </div>
             {totalBuy > 0 && (
               <div className="flex justify-between items-baseline mt-1">
-                <span className="text-xs text-gray-500">買取（鉄くずなど）</span>
+                <span className="text-xs text-gray-500">処分場の買取（鉄くずなど）</span>
                 <span className="text-sm font-bold text-blue-700">{yen(totalBuy)}</span>
               </div>
             )}
+            <div className="flex justify-between items-baseline mt-1">
+              <span className="text-sm font-bold text-gray-700">スクラップの売上</span>
+              <span className="font-bold text-lg text-blue-700">{yen(scrapMonth.total)}</span>
+            </div>
+            <div className="flex justify-between items-baseline mt-2 pt-2 border-t border-gray-100">
+              <span className="text-xs font-bold text-gray-600">差し引き（処分代 − 買取 − スクラップ）</span>
+              <span className="text-sm font-bold">{yen(totalPay - totalBuy - scrapMonth.total)}</span>
+            </div>
             <p className="text-[11px] text-gray-500 mt-1">{monthly.length}か所の処分場{ym.y === ty && ym.m === tm ? '（今日までの分）' : ''}</p>
           </div>
 
-          {monthly.length === 0 && <p className="text-gray-400 text-center py-8 text-sm">この月の廃材の記録はありません。</p>}
+          {monthly.length === 0 && <p className="text-gray-400 text-center py-4 text-sm">この月の廃材の記録はありません。</p>}
 
           {monthly.map(s => {
             const expanded = open === s.siteId
@@ -215,9 +266,51 @@ export default function DisposalMonthlyPage() {
             )
           })}
 
-          {trend.table.size > 0 && (
+          {/* スクラップの売上。押すと品目別・現場別 */}
+          <div className="bg-white rounded-2xl border border-blue-100 overflow-hidden">
+            <button type="button" onClick={() => setOpen(open === -1 ? null : -1)} aria-expanded={open === -1}
+              className="w-full text-left p-3 flex justify-between items-center gap-2">
+              <span className="min-w-0">
+                <span className="block font-bold">スクラップ</span>
+                <span className="block text-[11px] text-gray-500">伝票 {scrapMonth.count}枚</span>
+              </span>
+              <span className="flex items-center gap-2 shrink-0">
+                <span className="font-bold text-blue-700">{yen(scrapMonth.total)}</span>
+                <span className="text-gray-400 text-xs">{open === -1 ? '▲' : '▼'}</span>
+              </span>
+            </button>
+            {open === -1 && (
+              <div className="border-t border-gray-100 px-3 pb-3">
+                {scrapMonth.count === 0 && <p className="text-sm text-gray-400 py-3">この月のスクラップの記録はありません。</p>}
+                {scrapMonth.count > 0 && (
+                  <>
+                    <p className="text-xs font-bold text-gray-500 mt-2 mb-1">品目別</p>
+                    <div className="flex flex-col divide-y divide-gray-100">
+                      {[...scrapMonth.items.entries()].sort((a, b) => b[1] - a[1]).map(([name, amount]) => (
+                        <div key={name} className="flex justify-between items-baseline gap-2 py-1.5 text-sm">
+                          <span className="min-w-0 truncate">{name}</span>
+                          <span className="shrink-0 font-medium">{yen(amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-xs font-bold text-gray-500 mt-3 mb-1">現場別</p>
+                    <div className="flex flex-col divide-y divide-gray-100">
+                      {[...scrapMonth.byProject.entries()].sort((a, b) => b[1] - a[1]).map(([pid, amount]) => (
+                        <Link key={pid} href={`/projects/${pid}/scrap`} className="flex justify-between items-baseline gap-2 py-1.5 text-sm">
+                          <span className="min-w-0 truncate text-blue-700">{projects[pid] ?? `現場 #${pid}`}</span>
+                          <span className="shrink-0 font-medium">{yen(amount)}</span>
+                        </Link>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {(trend.table.size > 0 || trend.scrapRow.some(v => v)) && (
             <div className="bg-white rounded-2xl border border-gray-100 p-3">
-              <p className="text-sm font-bold text-gray-700 mb-2">過去{TREND_MONTHS}か月の推移（処分代）</p>
+              <p className="text-sm font-bold text-gray-700 mb-2">過去{TREND_MONTHS}か月の推移</p>
               <div className="overflow-x-auto -mx-3 px-3">
                 <table className="text-xs w-full">
                   <thead>
@@ -239,10 +332,20 @@ export default function DisposalMonthlyPage() {
                         ))}
                       </tr>
                     ))}
+                    {trend.scrapRow.some(v => v) && (
+                      <tr className="border-t-2 border-gray-200 text-blue-700">
+                        <td className="py-1.5 pr-2 max-w-[7em] truncate font-bold">スクラップ</td>
+                        {trend.scrapRow.map((v, i) => (
+                          <td key={i} className={`py-1.5 px-1 text-right whitespace-nowrap ${i === 0 ? 'font-bold' : ''}`}>
+                            {v ? Math.round(v / 1000).toLocaleString() : '—'}
+                          </td>
+                        ))}
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
-              <p className="text-[11px] text-gray-400 mt-1">単位：千円（四捨五入）。左端が表示中の月です。</p>
+              <p className="text-[11px] text-gray-400 mt-1">単位：千円（四捨五入）。処分場は処分代（支払い）、スクラップは売上。左端が表示中の月です。</p>
             </div>
           )}
         </>
