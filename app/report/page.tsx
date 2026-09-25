@@ -120,7 +120,7 @@ function ReportInner() {
                 </div>
                 <div className="flex justify-between items-baseline gap-2 text-[11px] text-gray-500">
                   <span className="min-w-0">
-                    廃材 {s.cost.廃材処分.toLocaleString()}・人工 {s.cost.人工.toLocaleString()}・車両燃料 {(s.cost.車両代 + s.cost.燃料代).toLocaleString()}・経費 {s.cost.経費.toLocaleString()}
+                    廃材 {s.cost.廃材処分.toLocaleString()}・人工 {s.cost.人工.toLocaleString()}・車両 {s.cost.車両代.toLocaleString()}・燃料 {s.cost.燃料代.toLocaleString()}・経費 {s.cost.経費.toLocaleString()}
                     {s.scrap > 0 && <>・<span className="text-blue-700">スクラップ {s.scrap.toLocaleString()}</span></>}
                   </span>
                   <span className={`whitespace-nowrap font-medium ${s.profit >= 0 ? 'text-emerald-700' : 'text-gray-600'}`}>差引 {(s.profit >= 0 ? '+' : '') + s.profit.toLocaleString()}</span>
@@ -129,7 +129,7 @@ function ReportInner() {
             ))}
           </div>
           <p className="text-[10px] text-gray-400 mt-4">金額は円・税込。日別の費用・現場詳細の集計と同じ計算です。</p>
-          <Link href={`/disposal`} className="no-print block text-xs text-blue-700 underline mt-2">処分場・スクラップの月の合計を見る →</Link>
+          <Link href={`/disposal`} className="no-print block text-xs text-blue-700 underline mt-2">処分場・スクラップ・車両・燃料の月の合計を見る →</Link>
         </div>
       )}
     </div>
