@@ -405,6 +405,21 @@ export default function ProjectDetailPage() {
     sortDir === 'desc' ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date)
 
   const sortedWaste = [...wasteEntries].sort(sortFn)
+  // 処分場 → 種類ごとの数量の合計（社長の依頼。処分場の伝票と突き合わせるため）
+  const wasteBySite = (() => {
+    const map = new Map<string, { site: string; total: number; types: Map<string, { name: string; unit: string; qty: number; amount: number; count: number; revenue: boolean }> }>()
+    for (const e of wasteEntries as unknown as { quantity: number; amount: number; waste_type_id: number; waste_types?: { name?: string; unit?: string; entry_type?: string; disposal_sites?: { name?: string } } }[]) {
+      const site = e.waste_types?.disposal_sites?.name ?? '処分場不明'
+      if (!map.has(site)) map.set(site, { site, total: 0, types: new Map() })
+      const g = map.get(site)!
+      const key = `${e.waste_type_id}`
+      const t = g.types.get(key) ?? { name: e.waste_types?.name ?? '不明', unit: e.waste_types?.unit ?? '', qty: 0, amount: 0, count: 0, revenue: e.waste_types?.entry_type === 'revenue' }
+      t.qty += Number(e.quantity); t.amount += Number(e.amount); t.count++
+      g.types.set(key, t)
+      if (!t.revenue) g.total += Number(e.amount)
+    }
+    return [...map.values()].sort((a, b) => b.total - a.total)
+  })()
   const sortedLabor = [...laborEntries].sort(sortFn)
   const sortedOther = [...otherEntries].sort(sortFn)
 
@@ -753,6 +768,34 @@ export default function ProjectDetailPage() {
             <CostBar label="経費" amount={expenseAmt} max={maxBar} color="bg-gray-400" />
           </div>
         )}
+      </div>
+
+      {/* 処分場・種類ごとの数量の合計 */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-4">
+        <h2 className="font-bold text-gray-700 mb-1">処分場・種類ごとの数量</h2>
+        <p className="text-xs text-gray-500 mb-2">この現場から処分場へ持っていった量の合計です。</p>
+        {wasteBySite.length === 0 && <p className="text-sm text-gray-400">廃材の記録はまだありません。</p>}
+        <div className="flex flex-col gap-3">
+          {wasteBySite.map(g => (
+            <div key={g.site}>
+              <div className="flex justify-between items-baseline border-b border-gray-200 pb-1">
+                <span className="text-sm font-bold">{g.site}</span>
+                <span className="text-sm font-bold text-red-700">{fmt(g.total)}</span>
+              </div>
+              {[...g.types.values()].sort((a, b) => b.amount - a.amount).map(t => (
+                <div key={t.name + t.unit} className="flex justify-between items-baseline gap-2 py-1.5 text-sm border-b border-gray-50 last:border-0">
+                  <span className="min-w-0">
+                    {t.name}
+                    <span className="font-bold ml-2">{(Math.round(t.qty * 1000) / 1000).toLocaleString()}{t.unit}</span>
+                    {t.unit === 'kg' && t.qty >= 1000 && <span className="text-xs text-gray-500 ml-1">（約{(Math.round(t.qty / 100) / 10).toLocaleString()}t）</span>}
+                    <span className="text-xs text-gray-400 ml-2">{t.count}回</span>
+                  </span>
+                  <span className={`shrink-0 ${t.revenue ? 'text-blue-700' : ''}`}>{t.revenue ? '買取 ' : ''}{fmt(t.amount)}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* ソート切替 */}
