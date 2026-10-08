@@ -323,7 +323,7 @@ export default function AttendancePage() {
               </tbody>
             </table>
           </div>
-          <p className="text-[11px] text-gray-400 mt-2">○＝全日、半＝半日、黄色の点＝残業代あり。残業代は給料の計算用で、現場の原価には入れていません。</p>
+          <p className="text-[11px] text-gray-400 mt-2">○＝全日、半＝半日、黄色の点＝残業代あり。残業代は、その日に入っていた現場へ人工の割合で分けて、現場の原価（人工費）にも入ります。</p>
         </>
       )}
     </div>
