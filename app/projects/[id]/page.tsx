@@ -8,6 +8,7 @@ import Checklist from './Checklist'
 import BuildingInfo from './BuildingInfo'
 import ForemanAssign from './ForemanAssign'
 import { loadGate, GateState } from '@/lib/morningGate'
+import { allocateOvertime, fetchOvertime, OvertimeShare } from '@/lib/overtime'
 import { logAction } from '@/lib/audit'
 import { useDeviceUser, isWorker } from '@/lib/user'
 
@@ -79,6 +80,8 @@ export default function ProjectDetailPage() {
     try { sessionStorage.setItem('ryoshin_detail_tab', t) } catch { /* 覚えられない端末では今回だけ */ }
   }
   const [todayGate, setTodayGate] = useState<GateState | null>(null)
+  // この現場に振り分けた残業代（出面の残業代を、その日に入っていた現場へ人工の割合で分けた分）
+  const [overtimeShares, setOvertimeShares] = useState<OvertimeShare[]>([])
 
   useEffect(() => { load() }, [id])
 
@@ -109,9 +112,23 @@ export default function ProjectDetailPage() {
     setVehicles(vh ?? [])
     setLatestNote(mn ?? null)
     loadGate(supabase, Number(id), todayStr).then(setTodayGate).catch(() => setTodayGate(null))
+    loadOvertimeShares((le ?? []) as { worker_id: number; date: string }[])
     setCheckedToday(!!mc)
     setCheckItems({ danger: false, cautions: false, notices: false })
     setLoading(false)
+  }
+
+  // 残業代はほかの現場と分け合うことがあるので、同じ日・同じ人の人工の記録をほかの現場の分も読んで振り分ける
+  async function loadOvertimeShares(mine: { worker_id: number; date: string }[]) {
+    if (!mine.length) { setOvertimeShares([]); return }
+    const dates = mine.map(e => e.date).sort()
+    const from = dates[0], to = dates[dates.length - 1]
+    const workerIds = [...new Set(mine.map(e => e.worker_id))]
+    const overtime = (await fetchOvertime(supabase, from, to)).filter(o => o.worker_id != null && workerIds.includes(o.worker_id))
+    if (!overtime.length) { setOvertimeShares([]); return }
+    const { data: labor } = await supabase.from('labor_entries')
+      .select('project_id, worker_id, date, day_type').in('worker_id', workerIds).gte('date', from).lte('date', to)
+    setOvertimeShares(allocateOvertime(overtime, labor ?? []).filter(o => o.project_id === Number(id)))
   }
 
   function tapMorningCheck() {
@@ -258,6 +275,10 @@ export default function ProjectDetailPage() {
       rows.push([e.date, label, '', e.workers?.name ?? '', '1', '人', String(e.amount)])
     })
 
+    overtimeShares.forEach(o => {
+      rows.push([o.date, '人工費（残業代）', '', workers.find(w => w.id === o.worker_id)?.name ?? '', '1', '式', String(o.amount)])
+    })
+
     sortedOther.forEach((e: any) => {
       const label = e.entry_type === 'fuel' ? `燃料代${e.fuel_type ? `（${e.fuel_type}）` : ''}`
         : e.entry_type === 'expense' ? '経費'
@@ -383,7 +404,8 @@ export default function ProjectDetailPage() {
   const wasteCost = wasteEntries.filter((e: any) => e.waste_types?.entry_type === 'cost').reduce((s, e) => s + Number(e.amount), 0)
   const scrapRevenue = wasteEntries.filter((e: any) => e.waste_types?.entry_type === 'revenue').reduce((s, e) => s + Number(e.amount), 0)
     + scrapRecords.reduce((s, r) => s + Number(r.amount), 0)
-  const laborAmt = laborEntries.reduce((s, e) => s + Number(e.amount), 0) + otherEntries.filter(e => e.entry_type === 'labor').reduce((s, e) => s + Number(e.amount), 0)
+  const overtimeAmt = overtimeShares.reduce((s, o) => s + o.amount, 0)
+  const laborAmt = laborEntries.reduce((s, e) => s + Number(e.amount), 0) + otherEntries.filter(e => e.entry_type === 'labor').reduce((s, e) => s + Number(e.amount), 0) + overtimeAmt
   const fuelAmt = otherEntries.filter(e => e.entry_type === 'fuel').reduce((s, e) => s + Number(e.amount), 0)
   const leaseAmt = otherEntries.filter(e => e.entry_type === 'lease').reduce((s, e) => s + Number(e.amount), 0)
   const leaseRentalAmt = otherEntries.filter(e => e.entry_type === 'lease' && e.vehicles?.category === 'rental').reduce((s, e) => s + Number(e.amount), 0)
@@ -405,6 +427,21 @@ export default function ProjectDetailPage() {
     sortDir === 'desc' ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date)
 
   const sortedWaste = [...wasteEntries].sort(sortFn)
+  // 処分場 → 種類ごとの数量の合計（社長の依頼。処分場の伝票と突き合わせるため）
+  const wasteBySite = (() => {
+    const map = new Map<string, { site: string; total: number; types: Map<string, { name: string; unit: string; qty: number; amount: number; count: number; revenue: boolean }> }>()
+    for (const e of wasteEntries as unknown as { quantity: number; amount: number; waste_type_id: number; waste_types?: { name?: string; unit?: string; entry_type?: string; disposal_sites?: { name?: string } } }[]) {
+      const site = e.waste_types?.disposal_sites?.name ?? '処分場不明'
+      if (!map.has(site)) map.set(site, { site, total: 0, types: new Map() })
+      const g = map.get(site)!
+      const key = `${e.waste_type_id}`
+      const t = g.types.get(key) ?? { name: e.waste_types?.name ?? '不明', unit: e.waste_types?.unit ?? '', qty: 0, amount: 0, count: 0, revenue: e.waste_types?.entry_type === 'revenue' }
+      t.qty += Number(e.quantity); t.amount += Number(e.amount); t.count++
+      g.types.set(key, t)
+      if (!t.revenue) g.total += Number(e.amount)
+    }
+    return [...map.values()].sort((a, b) => b.total - a.total)
+  })()
   const sortedLabor = [...laborEntries].sort(sortFn)
   const sortedOther = [...otherEntries].sort(sortFn)
 
@@ -721,6 +758,11 @@ export default function ProjectDetailPage() {
           <div className="text-gray-600">廃材処分費</div><div className="text-right font-medium text-red-600">{fmt(wasteCost)}</div>
           <div className="text-gray-600">スクラップ収益</div><div className="text-right font-medium text-blue-600">{fmt(scrapRevenue)}</div>
           <div className="text-gray-600">人工費</div><div className="text-right">{fmt(laborAmt)}</div>
+          {overtimeAmt > 0 && (
+            <div className="col-span-2 text-xs text-gray-400 flex justify-between -mt-0.5 mb-0.5">
+              <span>うち残業代 {fmt(overtimeAmt)}（出面で入れた分）</span>
+            </div>
+          )}
           <div className="text-gray-600">燃料代</div><div className="text-right">{fmt(fuelAmt)}</div>
           <div className="text-gray-600">車両代</div><div className="text-right">{fmt(leaseAmt)}</div>
           {leaseAmt > 0 && (
@@ -753,6 +795,34 @@ export default function ProjectDetailPage() {
             <CostBar label="経費" amount={expenseAmt} max={maxBar} color="bg-gray-400" />
           </div>
         )}
+      </div>
+
+      {/* 処分場・種類ごとの数量の合計 */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-4">
+        <h2 className="font-bold text-gray-700 mb-1">処分場・種類ごとの数量</h2>
+        <p className="text-xs text-gray-500 mb-2">この現場から処分場へ持っていった量の合計です。</p>
+        {wasteBySite.length === 0 && <p className="text-sm text-gray-400">廃材の記録はまだありません。</p>}
+        <div className="flex flex-col gap-3">
+          {wasteBySite.map(g => (
+            <div key={g.site}>
+              <div className="flex justify-between items-baseline border-b border-gray-200 pb-1">
+                <span className="text-sm font-bold">{g.site}</span>
+                <span className="text-sm font-bold text-red-700">{fmt(g.total)}</span>
+              </div>
+              {[...g.types.values()].sort((a, b) => b.amount - a.amount).map(t => (
+                <div key={t.name + t.unit} className="flex justify-between items-baseline gap-2 py-1.5 text-sm border-b border-gray-50 last:border-0">
+                  <span className="min-w-0">
+                    {t.name}
+                    <span className="font-bold ml-2">{(Math.round(t.qty * 1000) / 1000).toLocaleString()}{t.unit}</span>
+                    {t.unit === 'kg' && t.qty >= 1000 && <span className="text-xs text-gray-500 ml-1">（約{(Math.round(t.qty / 100) / 10).toLocaleString()}t）</span>}
+                    <span className="text-xs text-gray-400 ml-2">{t.count}回</span>
+                  </span>
+                  <span className={`shrink-0 ${t.revenue ? 'text-blue-700' : ''}`}>{t.revenue ? '買取 ' : ''}{fmt(t.amount)}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* ソート切替 */}

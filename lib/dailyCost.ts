@@ -1,4 +1,5 @@
 import { SupabaseClient } from '@supabase/supabase-js'
+import { allocateOvertime, fetchOvertime, LaborLite } from '@/lib/overtime'
 
 // 現場詳細の集計カードと同じ区分・同じ足し方にする。
 // ここがずれると「現場の合計」と「日ごとの合計」が合わなくなり、どちらが正しいか分からなくなる。
@@ -52,12 +53,13 @@ function entryTypeOf(w: WasteRow['waste_types']) {
 export async function fetchMonthCosts(supabase: SupabaseClient, year: number, month: number) {
   const { from, to } = monthRange(year, month)
 
-  const [{ data: pj }, { data: waste }, { data: labor }, { data: other }, { data: scrap }] = await Promise.all([
+  const [{ data: pj }, { data: waste }, { data: labor }, { data: other }, { data: scrap }, overtime] = await Promise.all([
     supabase.from('projects').select('id, name'),
     supabase.from('waste_entries').select('project_id, date, amount, waste_types(entry_type)').gte('date', from).lte('date', to),
-    supabase.from('labor_entries').select('project_id, date, amount').gte('date', from).lte('date', to),
+    supabase.from('labor_entries').select('project_id, worker_id, date, amount, day_type').gte('date', from).lte('date', to),
     supabase.from('other_entries').select('project_id, date, amount, entry_type').gte('date', from).lte('date', to),
     supabase.from('scrap_records').select('project_id, date, amount').gte('date', from).lte('date', to),
+    fetchOvertime(supabase, from, to),
   ])
 
   const names = new Map<number, string>()
@@ -92,6 +94,8 @@ export async function fetchMonthCosts(supabase: SupabaseClient, year: number, mo
     add(e.date, e.project_id, isRevenue ? 'スクラップ' : '廃材処分', Number(e.amount))
   })
   ;((labor ?? []) as unknown as Row[]).forEach(e => add(e.date, e.project_id, '人工', Number(e.amount)))
+  // 残業代も人工費に入れる（その日に入っていた現場へ人工の割合で振り分け）
+  allocateOvertime(overtime, (labor ?? []) as unknown as LaborLite[]).forEach(o => add(o.date, o.project_id, '人工', o.amount))
   ;((other ?? []) as unknown as OtherRow[]).forEach(e => {
     const cat: CostCat = e.entry_type === 'labor' ? '人工'
       : e.entry_type === 'fuel' ? '燃料代'

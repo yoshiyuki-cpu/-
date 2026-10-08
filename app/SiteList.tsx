@@ -3,6 +3,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { supabase, Project } from '@/lib/supabase'
 import Link from 'next/link'
 import { logAction } from '@/lib/audit'
+import { allocateOvertime, fetchOvertime } from '@/lib/overtime'
 
 type ProjectWithTotals = Project & {
   waste_cost: number
@@ -54,15 +55,16 @@ export default function SiteList() {
 
     // 以前は現場ごとに4回ずつ問い合わせていて（24現場で約100回）、スマホの回線では
     // 開くのに数秒かかっていた。全記録を4回で取り、現場ごとに振り分ける
-    const [wasteRows, otherRows, laborRows, scrapRows] = await Promise.all([
+    const [wasteRows, otherRows, laborRows, scrapRows, overtimeRows] = await Promise.all([
       fetchAll<{ project_id: number; amount: number; waste_types: { entry_type: string } | { entry_type: string }[] | null }>(
         (f, t) => supabase.from('waste_entries').select('project_id, amount, waste_types(entry_type)').range(f, t)),
       fetchAll<{ project_id: number; entry_type: string; amount: number }>(
         (f, t) => supabase.from('other_entries').select('project_id, entry_type, amount').range(f, t)),
-      fetchAll<{ project_id: number; amount: number }>(
-        (f, t) => supabase.from('labor_entries').select('project_id, amount').range(f, t)),
+      fetchAll<{ project_id: number; worker_id: number; date: string; day_type: string | null; amount: number }>(
+        (f, t) => supabase.from('labor_entries').select('project_id, worker_id, date, day_type, amount').range(f, t)),
       fetchAll<{ project_id: number; amount: number }>(
         (f, t) => supabase.from('scrap_records').select('project_id, amount').range(f, t)),
+      fetchOvertime(supabase),
     ])
 
     const totals = new Map<number, Omit<ProjectWithTotals, keyof Project>>()
@@ -87,6 +89,8 @@ export default function SiteList() {
       else if (e.entry_type === 'expense') t.expense_amount += Number(e.amount)
     })
     laborRows.forEach(e => { of(e.project_id).labor_amount += Number(e.amount) })
+    // 残業代も人工費に（その日に入っていた現場へ人工の割合で振り分け）
+    allocateOvertime(overtimeRows, laborRows).forEach(o => { of(o.project_id).labor_amount += o.amount })
 
     setProjects(visible.map(p => ({ ...p, ...of(p.id) })))
     setLoading(false)
