@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { sendEntryReport, collectSiteStatus, buildEntryReportLines } from '@/lib/entryReport'
+import { sendEntryReport, collectSiteStatus, collectLateEntries, buildEntryReportLines } from '@/lib/entryReport'
 import { jstToday } from '@/lib/date'
 
 // 通知設定の「今すぐ送ってみる」「文面を見る」用。自動の19:30便と同じ文面を使う。
@@ -10,7 +10,7 @@ export const maxDuration = 60
 export async function GET() {
   const date = jstToday()
   const timeLabel = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: 'numeric', minute: '2-digit' }).format(new Date())
-  const lines = buildEntryReportLines(await collectSiteStatus(supabase, date), date, timeLabel)
+  const lines = buildEntryReportLines(await collectSiteStatus(supabase, date), date, timeLabel, await collectLateEntries(supabase, date))
   return NextResponse.json({ text: lines.join('\n') })
 }
 

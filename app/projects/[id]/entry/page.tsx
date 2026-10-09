@@ -6,7 +6,8 @@ import Link from 'next/link'
 import { jstToday } from '@/lib/date'
 import { loadChecklist, undoneItems, ChecklistState } from '@/lib/checklist'
 import { isOffline, isNetworkError, enqueue } from '@/lib/offlineQueue'
-import { loadGate, gateOpen, GateState } from '@/lib/morningGate'
+import { loadGate, gateOpen, GateState, isLateDate, LATE_PREFIX } from '@/lib/morningGate'
+import { logAction } from '@/lib/audit'
 import MorningGateBlock from '../MorningGateBlock'
 
 type Tab = 'waste' | 'labor' | 'fuel' | 'lease' | 'expense'
@@ -253,6 +254,11 @@ export default function EntryPage() {
     ? Math.round(selectedType.unit_price * Number(wasteForm.quantity))
     : null
 
+  // 前の日の分（入れ忘れの後入れ）は、操作の記録に残して19:30の報告に載せる
+  function logLate(date: string, what: string) {
+    logAction(supabase, 'create', 'labor_entries', null, `${LATE_PREFIX} ${projectName} の ${Number(date.slice(5, 7))}/${Number(date.slice(8))} 分：${what}`)
+  }
+
   async function saveWaste(e: React.FormEvent) {
     e.preventDefault()
     if (!wasteForm.waste_type_id || !wasteForm.quantity) return
@@ -269,6 +275,7 @@ export default function EntryPage() {
     }], `廃材 ${selectedType?.name ?? ''} ${wasteForm.quantity}${selectedType?.unit ?? ''}（${wasteForm.date.slice(5).replace('-', '/')}）`)
     setSaving(false)
     if (result === 'error') { alert('保存できませんでした。もう一度お試しください。'); return }
+    if (isLateDate(wasteForm.date)) logLate(wasteForm.date, `処分 ${selectedType?.name ?? ''} ${wasteForm.quantity}${selectedType?.unit ?? ''} ${(estimatedAmount ?? 0).toLocaleString()}円`)
     showSaved(result)
     // 日付・処分場を引き継ぎ、廃材種類と数量のみリセット
     setWasteForm(f => ({ ...f, waste_type_id: '', quantity: '' }))
@@ -305,6 +312,7 @@ export default function EntryPage() {
     const result = await insertOrQueue('labor_entries', rows, `人工 ${rows.length}名（${laborDate.slice(5).replace('-', '/')}）`)
     setSaving(false)
     if (result === 'error') { alert('保存できませんでした。もう一度お試しください。'); return }
+    if (isLateDate(laborDate)) logLate(laborDate, `人工${rows.length}名`)
     showSaved(result)
     setWorkerDayType({})
     if (result === 'sent') await loadLaborDone()
@@ -348,6 +356,7 @@ export default function EntryPage() {
     const result = await insertOrQueue('other_entries', rows, `${tabLabel} ${amount.toLocaleString()}円（${otherForm.date.slice(5).replace('-', '/')}）`)
     setSaving(false)
     if (result === 'error') { alert('保存できませんでした。もう一度お試しください。'); return }
+    if (isLateDate(otherForm.date)) logLate(otherForm.date, `${tabLabel} ${amount.toLocaleString()}円`)
     if (vehicleId) setRecordedVehicleIds((prev: Set<number>) => new Set(prev).add(vehicleId))
     showSaved(result)
     setOtherForm({ date: otherForm.date, unit_price: '', note: '', quantity: '', fuel_type: '', vehicle_category: '', vehicle_id: '', liter_price: '', mobilization_fee: '' })

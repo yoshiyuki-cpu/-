@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from 'react'
 import { supabase, Project, WasteEntry, OtherEntry, DisposalSite, WasteType, Vehicle, MeetingNote } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { jstToday } from '@/lib/date'
+import { jstToday, jstDateOffset } from '@/lib/date'
 import Checklist from './Checklist'
 import BuildingInfo from './BuildingInfo'
 import ForemanAssign from './ForemanAssign'
@@ -380,6 +380,15 @@ export default function ProjectDetailPage() {
             一度確認すると、今日はこの現場を使う全員がそのまま入れます
           </p>
         </div>
+
+        <Link href={`/projects/${id}/today?date=${jstDateOffset(-1)}`}
+          className="mt-3 flex items-center justify-between bg-white rounded-2xl border border-gray-200 px-4 py-3">
+          <span>
+            <span className="block text-sm font-bold text-gray-800">前の日の入れ忘れだけ入れる</span>
+            <span className="block text-xs text-gray-500">朝一チェックは省いて、人工・処分代・経費のうち要るものだけ</span>
+          </span>
+          <span className="text-blue-700 font-bold">→</span>
+        </Link>
 
         {picking && (
           <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={() => setPicking(false)}>

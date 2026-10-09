@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { sendReminderEmail, sendReminderPush, sendLineMessage } from '@/lib/notify'
 import { jstToday } from '@/lib/date'
 import { REFLECTION_NOTIFY_EMAIL_KEY } from '@/lib/passcode'
-import { GATE_START, TOOLS_START } from '@/lib/morningGate'
+import { GATE_START, TOOLS_START, LATE_PREFIX } from '@/lib/morningGate'
 import { collectSiteStatus, classify, SiteStatus } from '@/lib/siteStatus'
 
 export { collectSiteStatus, classify }
@@ -21,7 +21,18 @@ const APP_URL = process.env.APP_URL || 'https://koji-daichou-zeta.vercel.app'
 
 const mark = (b: boolean) => (b ? '○' : '×')
 
-export function buildEntryReportLines(statuses: SiteStatus[], date: string, timeLabel: string): string[] {
+// 今日のうちに入れた「前の日の分」（入れ忘れの後入れ）。操作の記録から拾う。表が無ければ空
+export async function collectLateEntries(supabase: SupabaseClient, date: string): Promise<string[]> {
+  try {
+    const { data, error } = await supabase.from('audit_log').select('summary, actor_name')
+      .gte('created_at', `${date}T00:00:00+09:00`).like('summary', `${LATE_PREFIX}%`).order('created_at')
+    if (error) return []
+    return ((data ?? []) as { summary: string; actor_name: string | null }[])
+      .map(r => `${r.summary.slice(LATE_PREFIX.length).trim()}${r.actor_name ? `（${r.actor_name}）` : ''}`)
+  } catch { return [] }
+}
+
+export function buildEntryReportLines(statuses: SiteStatus[], date: string, timeLabel: string, late: string[] = []): string[] {
   const [y, m, d] = date.split('-').map(Number)
   const wd = '日月火水木金土'[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]
   const missing = statuses.filter(s => classify(s) === 'missing')
@@ -44,8 +55,13 @@ export function buildEntryReportLines(statuses: SiteStatus[], date: string, time
   if (none.length) {
     lines.push(`■ 今日の記録なし（休工？） ${none.length}`, `　${none.map(s => s.name).join('、')}`, '')
   }
+  if (late.length) {
+    lines.push(`■ 後入れ（前の日の入れ忘れ） ${late.length}`)
+    for (const l of late) lines.push(`　${l}`)
+    lines.push('')
+  }
   if (!statuses.length) lines.push('進行中の現場がありません。', '')
-  if (date >= GATE_START) lines.push(`※KY活動・議事録${date >= TOOLS_START ? '・道具の確認' : ''}が済んでいない現場は、人工・処分代を入力できない設定です。`)
+  if (date >= GATE_START) lines.push(`※KY活動・議事録${date >= TOOLS_START ? '・道具の確認' : ''}が済んでいない現場は、人工・処分代を入力できない設定です（前の日の入れ忘れは後入れできます）。`)
   lines.push(`アプリ：${APP_URL}`)
   return lines
 }
@@ -56,8 +72,8 @@ export type ReportResult = { sites: number; missing: number; sentTo: string[]; s
 export async function sendEntryReport(supabase: SupabaseClient, now = new Date()): Promise<ReportResult> {
   const date = jstToday(now)
   const timeLabel = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: 'numeric', minute: '2-digit' }).format(now)
-  const statuses = await collectSiteStatus(supabase, date)
-  const lines = buildEntryReportLines(statuses, date, timeLabel)
+  const [statuses, late] = await Promise.all([collectSiteStatus(supabase, date), collectLateEntries(supabase, date)])
+  const lines = buildEntryReportLines(statuses, date, timeLabel, late)
   const text = lines.join('\n')
   const subject = `【良心アプリ】${date.slice(5).replace('-', '/')} 現場の記入状況`
   const sentTo: string[] = []
