@@ -5,17 +5,22 @@ import { useParams, useRouter } from 'next/navigation'
 import { supabase, WasteType } from '@/lib/supabase'
 import { jstToday, jstDateOffset } from '@/lib/date'
 import { isOffline, isNetworkError, enqueue } from '@/lib/offlineQueue'
-import { loadGate, gateOpen, GateState } from '@/lib/morningGate'
+import { loadGate, gateOpen, GateState, LATE_PREFIX } from '@/lib/morningGate'
 import { logAction } from '@/lib/audit'
 import MorningGateBlock from '../MorningGateBlock'
 
 // 夕方の「今日の記入」。人工・廃材・経費を1画面に縦に並べ、最後に1回だけ保存する。
 // 入力の7割が17時台に集中しているので、ここを速くするのが一番効く（2026-09）。
 // 燃料代（リットル計算）・車両代（回送費）・レシートの読み取り・音声は「くわしく入力」に残してある。
+//
+// 日付を前の日にすると「入れ忘れの後入れ」になる（2026-10 社長の依頼）。朝の確認は求めず、
+// 人工・処分代・経費のうち入れるものだけを選んで出す。後入れしたことは19:30の報告に載る。
 
 const LABOR_UNIT_PRICE = Math.round(15000 * 1.1)   // entry 画面と同じ単価
 const LABOR_UNIT_PRICE_HALF = Math.round(LABOR_UNIT_PRICE / 2)
 type DayType = 'full' | 'half'
+type Part = 'labor' | 'waste' | 'expense'
+const PARTS: { key: Part; label: string }[] = [{ key: 'labor', label: '人工' }, { key: 'waste', label: '処分代' }, { key: 'expense', label: '経費' }]
 type WT = WasteType & { disposal_sites?: { name: string } }
 
 // 数量の＋−の幅。トン・立米は0.5、キロは10、それ以外は1
@@ -44,6 +49,8 @@ export default function TodayEntryPage() {
   const [expense, setExpense] = useState({ amount: '', note: '' })
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ tone: 'ok' | 'warn' | 'bad'; text: string } | null>(null)
+  // 後入れのときに出す欄（入れるものだけ選ぶ）
+  const [parts, setParts] = useState<Part[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -57,6 +64,9 @@ export default function TodayEntryPage() {
         supabase.from('waste_entries').select('waste_type_id').eq('project_id', projectId).order('date', { ascending: false }).limit(200),
       ])
       if (cancelled) return
+      // 「?date=2026-10-08」で開いたら、その日の後入れから始める（朝一チェックの画面などから来る）
+      const d = new URLSearchParams(window.location.search).get('date')
+      if (d && /^\d{4}-\d{2}-\d{2}$/.test(d) && d <= jstToday()) setDate(d)
       setProjectName((pj?.[0] as { name?: string } | undefined)?.name ?? '')
       // 段取りから外した人（退職者など）は出さない
       setWorkers(((wk ?? []) as { id: number; name: string; in_dispatch?: boolean }[]).filter(w => w.in_dispatch !== false))
@@ -135,10 +145,12 @@ export default function TodayEntryPage() {
     })
   }
 
+  const late = date < jstToday()
+  const show = (p: Part) => !late || parts.includes(p)
   const open = gate ? gateOpen(gate) : false
-  const laborRows = open ? Object.entries(labor).filter(([w]) => !(Number(w) in laborDone)) : []
-  const wasteRows = open ? typeRows.filter(t => Number(qty[t.id]) > 0) : []
-  const expenseAmount = Number(expense.amount) || 0
+  const laborRows = open && show('labor') ? Object.entries(labor).filter(([w]) => !(Number(w) in laborDone)) : []
+  const wasteRows = open && show('waste') ? typeRows.filter(t => Number(qty[t.id]) > 0) : []
+  const expenseAmount = show('expense') ? Number(expense.amount) || 0 : 0
   const laborTotal = laborRows.reduce((s, [, d]) => s + (d === 'half' ? LABOR_UNIT_PRICE_HALF : LABOR_UNIT_PRICE), 0)
   const wasteTotal = wasteRows.reduce((s, t) => s + Math.round(t.unit_price * Number(qty[t.id])), 0)
   const count = (laborRows.length ? 1 : 0) + wasteRows.length + (expenseAmount > 0 ? 1 : 0)
@@ -196,7 +208,9 @@ export default function TodayEntryPage() {
       setMessage({ tone: 'warn', text: '圏外なので端末に貯めました。つながったら自動で送ります ✓' })
     } else {
       setMessage({ tone: 'ok', text: `保存しました ✓　${yen(total)}` })
-      logAction(supabase, 'create', 'labor_entries', null, `${projectName} の今日の記入（${md}）：${count}件 ${yen(total)}`)
+      logAction(supabase, 'create', 'labor_entries', null, late
+        ? `${LATE_PREFIX} ${projectName} の ${Number(date.slice(5, 7))}/${Number(date.slice(8))} 分：${[laborRows.length && `人工${laborRows.length}名`, wasteRows.length && `処分${wasteRows.length}件`, expenseAmount > 0 && '経費1件'].filter(Boolean).join('・')} ${yen(total)}`
+        : `${projectName} の今日の記入（${md}）：${count}件 ${yen(total)}`)
     }
     if (!results.includes('error')) {
       setLabor({}); setQty({}); setExpense({ amount: '', note: '' })
@@ -215,12 +229,43 @@ export default function TodayEntryPage() {
       <div className="flex items-end justify-between gap-2">
         <div className="min-w-0">
           <p className="text-xs text-gray-500 truncate">{projectName}</p>
-          <h1 className="text-xl font-bold">今日の記入</h1>
+          <h1 className="text-xl font-bold">{late ? '入れ忘れの後入れ' : '今日の記入'}</h1>
         </div>
         <input id="today-date" type="date" aria-label="日付" value={date} max={jstToday()}
-          onChange={e => { setDate(e.target.value); setLabor({}); setMessage(null) }}
-          className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white shrink-0" />
+          onChange={e => { if (e.target.value) { setDate(e.target.value); setLabor({}); setMessage(null) } }}
+          className={`border rounded-lg px-2 py-1.5 text-sm shrink-0 ${late ? 'border-amber-400 bg-amber-50 font-bold' : 'border-gray-200 bg-white'}`} />
       </div>
+
+      {!late && (
+        <button type="button" onClick={() => { setDate(jstDateOffset(-1)); setLabor({}); setMessage(null) }}
+          className="self-start text-xs text-blue-700 underline py-1">
+          昨日より前の入れ忘れを入れる（後入れ）
+        </button>
+      )}
+
+      {late && (
+        <section className="bg-amber-50 border border-amber-300 rounded-2xl p-3" aria-labelledby="late-title">
+          <p id="late-title" className="font-bold text-amber-900">{Number(date.slice(5, 7))}/{Number(date.slice(8))} 分の入れ忘れを入れます</p>
+          <p className="text-xs text-amber-900 mt-1">
+            朝の KY活動・議事録・道具の確認は省きます。後入れしたことは、19:30の記入状況の報告に載ります。
+          </p>
+          <p className="text-sm font-medium mt-3 mb-1.5">入れるものを選んでください</p>
+          <div className="flex gap-2">
+            {PARTS.map(p => {
+              const on = parts.includes(p.key)
+              return (
+                <button key={p.key} type="button" aria-pressed={on}
+                  onClick={() => setParts(prev => on ? prev.filter(x => x !== p.key) : [...prev, p.key])}
+                  className={`flex-1 min-h-11 rounded-xl text-sm font-bold border ${on ? 'bg-blue-900 border-blue-900 text-white' : 'bg-white border-gray-300 text-gray-800'}`}>
+                  {on ? '✓ ' : ''}{p.label}
+                </button>
+              )
+            })}
+          </div>
+          <button type="button" onClick={() => { setDate(jstToday()); setLabor({}); setMessage(null) }}
+            className="text-xs text-blue-700 underline mt-2 py-1">今日の記入に戻る</button>
+        </section>
+      )}
 
       {message && (
         <div className={`rounded-xl px-3 py-2 text-sm font-medium border ${message.tone === 'ok' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : message.tone === 'warn' ? 'bg-amber-50 text-amber-900 border-amber-200' : 'bg-red-50 text-red-800 border-red-200'}`}>
@@ -237,7 +282,7 @@ export default function TodayEntryPage() {
 
       {gate && open && (
         <>
-          <section className="bg-white rounded-2xl border border-gray-100 p-3" aria-labelledby="sec-labor">
+          {show('labor') && <section className="bg-white rounded-2xl border border-gray-100 p-3" aria-labelledby="sec-labor">
             <div className="flex justify-between items-baseline">
               <h2 id="sec-labor" className="text-sm font-bold text-gray-700">人工</h2>
               <span className="text-[11px] text-gray-500">押すたびに 全日 → 半日 → 外す</span>
@@ -265,9 +310,9 @@ export default function TodayEntryPage() {
                 <span className="font-mono font-bold">{yen(laborTotal)}</span>
               </p>
             )}
-          </section>
+          </section>}
 
-          <section className="bg-white rounded-2xl border border-gray-100 p-3" aria-labelledby="sec-waste">
+          {show('waste') && <section className="bg-white rounded-2xl border border-gray-100 p-3" aria-labelledby="sec-waste">
             <h2 id="sec-waste" className="text-sm font-bold text-gray-700">廃材（処分代）<span className="text-[11px] font-normal text-gray-500 ml-2">この現場でよく出る種類</span></h2>
             <div className="flex flex-col divide-y divide-gray-100 mt-1">
               {typeRows.map(t => (
@@ -299,11 +344,11 @@ export default function TodayEntryPage() {
             {wasteRows.length > 0 && (
               <p className="text-xs text-gray-600 mt-2 flex justify-between"><span>{wasteRows.length}種類</span><span className="font-mono font-bold">{yen(wasteTotal)}</span></p>
             )}
-          </section>
+          </section>}
         </>
       )}
 
-      <section className="bg-white rounded-2xl border border-gray-100 p-3" aria-labelledby="sec-expense">
+      {show('expense') && <section className="bg-white rounded-2xl border border-gray-100 p-3" aria-labelledby="sec-expense">
         <h2 id="sec-expense" className="text-sm font-bold text-gray-700">経費</h2>
         <div className="flex gap-2 mt-2">
           <input id="expense-note" className="flex-1 min-w-0 border border-gray-200 rounded-lg px-3 py-2.5 text-base" placeholder="内容（例：ガソリン）"
@@ -314,13 +359,13 @@ export default function TodayEntryPage() {
         <Link href={`/projects/${projectId}/entry`} className="block text-xs text-blue-700 underline mt-2">
           燃料代・車両代・レシートの読み取り・音声で入れる → くわしく入力
         </Link>
-      </section>
+      </section>}
 
       <div className="fixed left-0 right-0 bottom-[calc(64px+env(safe-area-inset-bottom))] px-4 z-30">
         <div className="max-w-2xl mx-auto">
           <button onClick={save} disabled={!count || saving}
             className="w-full min-h-14 rounded-2xl bg-blue-900 text-white text-base font-bold shadow-lg disabled:bg-gray-300 disabled:text-gray-500 disabled:shadow-none">
-            {saving ? '保存中...' : count ? `${count}件まとめて保存　${yen(total)}` : '入れるものを選んでください'}
+            {saving ? '保存中...' : count ? `${late ? '後入れで' : ''}${count}件まとめて保存　${yen(total)}` : '入れるものを選んでください'}
           </button>
         </div>
       </div>
