@@ -4,6 +4,7 @@ import { supabase, DisposalSite, WasteType, Vehicle, FuelPrice, SupportCompany }
 import Link from 'next/link'
 import { useDesign, setDesign } from '@/lib/design'
 import { useLayout, setLayout } from '@/lib/layout'
+import BillingLink from '@/app/billing/BillingLink'
 
 type Worker = {
   id: number; name: string; company_name: string | null; email: string | null; is_foreman: boolean
@@ -355,6 +356,7 @@ export default function MasterPage() {
       <h1 className="text-xl font-bold mb-3">その他・マスタ</h1>
       {/* 横に並べると390px幅で文字が縦に割れていたので、横スクロールにして1行に収める */}
       <div className="flex gap-1.5 mb-3 overflow-x-auto pb-1 -mx-4 px-4">
+        <BillingLink />
         <Link href="/usage" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">📊 利用状況</Link>
         <Link href="/tools" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🧰 置き場道具</Link>
         <Link href="/notifications" className="shrink-0 whitespace-nowrap text-sm text-blue-600 border border-gray-200 bg-white rounded-full px-3 py-1.5">🔔 通知設定</Link>
