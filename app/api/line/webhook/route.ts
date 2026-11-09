@@ -11,6 +11,7 @@ import { collectLateEntries } from '@/lib/entryReport'
 import { buildEntryReportFlex } from '@/lib/entryReportFlex'
 import { handleManifestText, handleManifestPostback } from '@/lib/manifestLine'
 import { handleDemenText, handleDemenPostback } from '@/lib/demenLine'
+import { handlePhoto, handlePhotoPostback } from '@/lib/photoLine'
 
 // LINE 公式アカウントの Webhook。
 // 1) 1対1トークで連携コードが送られてきたら、その人の LINE を作業員に結び付ける（従来どおり）
@@ -98,7 +99,7 @@ type LineEvent = {
   webhookEventId?: string
   replyToken?: string
   source?: { type: 'user' | 'group' | 'room'; userId?: string; groupId?: string; roomId?: string }
-  message?: { type: string; text?: string }
+  message?: { type: string; text?: string; id?: string }
   postback?: { data?: string }
 }
 
@@ -236,15 +237,16 @@ async function handleStatusRequest(event: LineEvent) {
 
 // グループの役目。名前に「マニフェスト」が入ったグループは処分の記録、
 // 「出面」か「経費確認」が入ったグループは1日のまとめ（人工・車両代）として読む。
+// 「スクラップ」「燃料」が入ったグループは、写真（伝票・レシート）を読む。
 // それ以外のグループでは何もしない（別会社の現場の報告が台帳に混ざらないように）。
 // 毎回名前を聞くと遅いので、一度調べたら app_settings に覚えておく
 const MANIFEST_KEYWORD = 'マニフェスト'
 const groupModeKey = (groupId: string) => `line_group_mode:${groupId}`
 
-type GroupMode = 'manifest' | 'demen' | 'none'
+type GroupMode = 'manifest' | 'demen' | 'scrap' | 'fuel' | 'none'
 async function groupMode(groupId: string): Promise<GroupMode> {
   const { data } = await supabase.from('app_settings').select('value').eq('key', groupModeKey(groupId)).maybeSingle()
-  if (data?.value === 'manifest' || data?.value === 'demen' || data?.value === 'none') return data.value
+  if (data?.value === 'manifest' || data?.value === 'demen' || data?.value === 'scrap' || data?.value === 'fuel' || data?.value === 'none') return data.value
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN
   let name = ''
   if (token) {
@@ -254,7 +256,8 @@ async function groupMode(groupId: string): Promise<GroupMode> {
   }
   // 名前が取れなかったときは覚えずに何もしない（次の書き込みでもう一度調べる）
   if (!name) return 'none'
-  const mode: GroupMode = name.includes(MANIFEST_KEYWORD) ? 'manifest' : /出面|経費確認/.test(name) ? 'demen' : 'none'
+  const mode: GroupMode = name.includes(MANIFEST_KEYWORD) ? 'manifest' : /出面|経費確認/.test(name) ? 'demen'
+    : /スクラップ/.test(name) ? 'scrap' : /燃料/.test(name) ? 'fuel' : 'none'
   await supabase.from('app_settings').upsert({ key: groupModeKey(groupId), value: mode, updated_at: new Date().toISOString() })
   return mode
 }
@@ -280,7 +283,9 @@ export async function POST(req: NextRequest) {
       if (event.type === 'join') {
         if (!groupId || !event.replyToken) return
         const mode = await groupMode(groupId)
-        await reply(event.replyToken, mode === 'demen'
+        await reply(event.replyToken, mode === 'scrap' || mode === 'fuel'
+          ? `このグループに送られた${mode === 'scrap' ? 'スクラップの伝票' : '給油のレシート'}の写真を読み取って、アプリに入れます。どの現場の分かはボタンで聞きます。\n写真はアルバムではなく、トークに直接送ってください（アルバムの写真は読めません）。荷台などほかの写真には返事をしません。\n違っていたら「取消」と返信してください。`
+          : mode === 'demen'
           ? 'このグループの1日のまとめを、人工と車両代としてアプリに入れます。廃材は台帳に入れず、マニフェストとの照合に使います。\n「計○人工」などの累計は台帳と比べ、ずれていればお知らせします。\n違っていたら「取消」と返信してください。'
           : mode === 'manifest'
           ? 'このグループの書き込みを、処分（廃材）の記録としてアプリに入れます。\n書き方の例：\n11月9日　現場名　2トン\n処分場　廃材の種類\n0.71t（kg・円でも可）\n違っていたら「取消」と返信してください。'
@@ -291,7 +296,16 @@ export async function POST(req: NextRequest) {
       // マニフェストのグループのボタン（現場の選択・それでも入れる・入れない）
       if (event.type === 'postback') {
         const params = new URLSearchParams(event.postback?.data ?? '')
-        const messages = await handleManifestPostback(supabase, params, groupId) ?? await handleDemenPostback(supabase, params, groupId)
+        const messages = await handleManifestPostback(supabase, params, groupId) ?? await handleDemenPostback(supabase, params, groupId) ?? await handlePhotoPostback(supabase, params, groupId)
+        if (messages && event.replyToken) await replyMessages(event.replyToken, messages)
+        return
+      }
+
+      // スクラップ・燃料のグループの写真（伝票・レシート）
+      if (event.type === 'message' && event.message?.type === 'image' && groupId && event.message.id) {
+        const mode = await groupMode(groupId)
+        if (mode !== 'scrap' && mode !== 'fuel') return
+        const messages = await handlePhoto(supabase, { kind: mode, messageId: event.message.id, groupId, userId: event.source?.userId ?? null, eventId: event.webhookEventId ?? null, today: jstToday() })
         if (messages && event.replyToken) await replyMessages(event.replyToken, messages)
         return
       }
@@ -305,6 +319,8 @@ export async function POST(req: NextRequest) {
         const mode = groupId ? await groupMode(groupId) : 'none'
         if (!groupId || mode === 'none') return
         if (/^(取消|取り消し|とりけし|キャンセル)$/.test(text)) { await handleCancel(event); return }
+        // スクラップ・燃料のグループの文字は読まない（写真だけ）
+        if (mode === 'scrap' || mode === 'fuel') return
         const input = { text, groupId, userId: event.source.userId ?? null, eventId: event.webhookEventId ?? null, today: jstToday() }
         const messages = mode === 'manifest' ? await handleManifestText(supabase, input) : await handleDemenText(supabase, input)
         if (messages && event.replyToken) await replyMessages(event.replyToken, messages)
