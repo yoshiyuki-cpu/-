@@ -1,9 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { sendReminderEmail, sendReminderPush, sendLineMessage } from '@/lib/notify'
+import { sendReminderEmail, sendReminderPush, sendLineMessage, sendLineMessages } from '@/lib/notify'
 import { jstToday } from '@/lib/date'
 import { REFLECTION_NOTIFY_EMAIL_KEY } from '@/lib/passcode'
 import { GATE_START, TOOLS_START, LATE_PREFIX } from '@/lib/morningGate'
 import { collectSiteStatus, classify, SiteStatus } from '@/lib/siteStatus'
+import { buildEntryReportFlex } from '@/lib/entryReportFlex'
 
 export { collectSiteStatus, classify }
 export type { SiteStatus }
@@ -75,6 +76,12 @@ export async function sendEntryReport(supabase: SupabaseClient, now = new Date()
   const [statuses, late] = await Promise.all([collectSiteStatus(supabase, date), collectLateEntries(supabase, date)])
   const lines = buildEntryReportLines(statuses, date, timeLabel, late)
   const text = lines.join('\n')
+  // LINE は「記入する」ボタン付きの Flex で送る。送れなかったら（形の誤り・一時的な失敗）、これまでどおり文字だけで送る
+  const flex = buildEntryReportFlex(statuses, date, timeLabel, late)
+  const sendLine = async (to: string) => {
+    try { await sendLineMessages(to, [flex]) }
+    catch (e) { console.error('entry report flex failed, sending text:', e); await sendLineMessage(to, text) }
+  }
   const subject = `【良心アプリ】${date.slice(5).replace('-', '/')} 現場の記入状況`
   const sentTo: string[] = []
   const skipped: string[] = []
@@ -85,7 +92,7 @@ export async function sendEntryReport(supabase: SupabaseClient, now = new Date()
   const ownerLine = settings?.find(s => s.key === OWNER_LINE_USER_ID_KEY)?.value
   const ownerEmail = settings?.find(s => s.key === REFLECTION_NOTIFY_EMAIL_KEY)?.value
   try {
-    if (ownerLine) { await sendLineMessage(ownerLine, text); sentTo.push('社長（LINE）') }
+    if (ownerLine) { await sendLine(ownerLine); sentTo.push('社長（LINE）') }
     else if (ownerEmail) { await sendReminderEmail(ownerEmail, subject, lines); sentTo.push('社長（メール）') }
     else skipped.push('社長（LINE もメールも未設定）')
   } catch (e) { console.error('entry report to owner failed:', e); skipped.push('社長（送信に失敗）') }
@@ -96,7 +103,7 @@ export async function sendEntryReport(supabase: SupabaseClient, now = new Date()
     { id: number; name: string; email: string | null; line_user_id: string | null }[]
   for (const w of receivers) {
     try {
-      if (w.line_user_id) { await sendLineMessage(w.line_user_id, text); sentTo.push(`${w.name}（LINE）`) }
+      if (w.line_user_id) { await sendLine(w.line_user_id); sentTo.push(`${w.name}（LINE）`) }
       else if (w.email) { await sendReminderEmail(w.email, subject, lines); sentTo.push(`${w.name}（メール）`) }
       else skipped.push(`${w.name}（LINE もメールも未設定。プッシュのみ）`)
       await sendReminderPush(supabase, w.id, '現場の記入状況', lines[0], APP_URL)

@@ -6,6 +6,9 @@ import { jstToday } from '@/lib/date'
 import { projectUrl } from '@/lib/notify'
 import { OWNER_LINE_LINK_CODE_KEY, OWNER_LINE_USER_ID_KEY } from '@/lib/entryReport'
 import { loadNameCtx, sanitizeParsed, summaryLines, hasEntries, registerParsed, cancelReport, fmtDate, NameCtx, Parsed } from '@/lib/lineReport'
+import { collectSiteStatus } from '@/lib/siteStatus'
+import { collectLateEntries } from '@/lib/entryReport'
+import { buildEntryReportFlex } from '@/lib/entryReportFlex'
 
 // LINE 公式アカウントの Webhook。
 // 1) 1対1トークで連携コードが送られてきたら、その人の LINE を作業員に結び付ける（従来どおり）
@@ -27,13 +30,20 @@ function verifySignature(body: string, signature: string | null) {
 }
 
 async function reply(replyToken: string, text: string) {
+  await replyMessages(replyToken, [{ type: 'text', text }])
+}
+
+// 返事（reply）は通数に数えられないので、「今日の状況」も返事で返す
+async function replyMessages(replyToken: string, messages: Record<string, unknown>[]) {
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN
   if (!token) return
-  await fetch(`${LINE_API}/v2/bot/message/reply`, {
+  const res = await fetch(`${LINE_API}/v2/bot/message/reply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ replyToken, messages: [{ type: 'text', text }] }),
+    body: JSON.stringify({ replyToken, messages }),
   })
+  // 失敗は握りつぶさずに残す（トークンや署名はログに出さない）
+  if (!res.ok) console.error('line reply failed:', res.status, (await res.text()).slice(0, 300))
 }
 
 // 文章を AI に読ませる。名前は登録済みの一覧から選ばせ、一覧に無いものは unmatched に入れさせる
@@ -198,6 +208,29 @@ async function handleReport(event: LineEvent, text: string): Promise<void> {
   }
 }
 
+// 19:30の報告を受け取っている人（社長と、受け取る印の付いた人）か。「今日の状況」はこの人たちだけ
+async function isReportReceiver(userId: string | undefined) {
+  if (!userId) return false
+  const { data: owner } = await supabase.from('app_settings').select('value').eq('key', OWNER_LINE_USER_ID_KEY).maybeSingle()
+  if (owner?.value && owner.value === userId) return true
+  // receives_entry_report の列が無い環境でも落ちないよう、全部取って JS で絞る（entryReport と同じ）
+  const { data: workers } = await supabase.from('workers').select('*').eq('line_user_id', userId)
+  return (workers ?? []).some((w: { receives_entry_report?: boolean }) => w.receives_entry_report === true)
+}
+
+// 「今日の状況」と送られたら、今の記入状況を19:30と同じ形で返す（返事なので通数を使わない）
+async function handleStatusRequest(event: LineEvent) {
+  if (!event.replyToken) return
+  if (!await isReportReceiver(event.source?.userId)) {
+    await reply(event.replyToken, '記入状況は、19時30分の報告を受け取っている人だけが見られます。')
+    return
+  }
+  const date = jstToday()
+  const timeLabel = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: 'numeric', minute: '2-digit' }).format(new Date())
+  const [statuses, late] = await Promise.all([collectSiteStatus(supabase, date), collectLateEntries(supabase, date)])
+  await replyMessages(event.replyToken, [buildEntryReportFlex(statuses, date, timeLabel, late)])
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.text()
   const signature = req.headers.get('x-line-signature')
@@ -216,6 +249,9 @@ export async function POST(req: NextRequest) {
       if (event.type !== 'message' || event.message?.type !== 'text') return
       const text = (event.message.text ?? '').trim()
       if (!text) return
+
+      // 1対1のトークで「今日の状況」と送られたら記入状況を返す。AI の報告読み取りより先に見る
+      if (event.source?.type === 'user' && /^(今日の状況|記入状況|今日の記入状況)$/.test(text)) { await handleStatusRequest(event); return }
 
       // 連携コード（英数6文字）は先に試す。1対1のトークでしか来ない前提だが、グループでも害はない
       if (/^[A-Z0-9]{6}$/i.test(text) && await handleLinkCode(event, text.toUpperCase())) return
