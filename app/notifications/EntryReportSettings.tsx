@@ -7,6 +7,8 @@ import { REFLECTION_NOTIFY_EMAIL_KEY } from '@/lib/passcode'
 // 社長は作業員の表に居ないので、LINE の連携は app_settings に持つ。
 const OWNER_LINE_USER_ID_KEY = 'owner_line_user_id'
 const OWNER_LINE_LINK_CODE_KEY = 'owner_line_link_code'
+// 工事台帳の公式LINE。お客様向けの良心公式LINEとは別のアカウントなので、送り間違えないよう ID を出す
+const APP_LINE_ID = '@216zxgyo'
 
 type W = { id: number; name: string; line_user_id: string | null; email: string | null; receives_entry_report?: boolean; in_dispatch?: boolean }
 
@@ -100,8 +102,10 @@ export default function EntryReportSettings() {
           <>
             <p className="text-xs text-gray-500 mt-1">
               {ownerEmail ? `今はメール（${ownerEmail}）で送ります。` : 'LINE もメールも未設定なので、今は届きません。'}
-              LINE で受け取るには、下のコードを良心の LINE 公式アカウントとのトークに送ってください。
+              LINE で受け取るには、工事台帳の LINE 公式アカウント（{APP_LINE_ID}）を友だち追加して、下のコードをそのトークに送ってください。お客様向けの良心公式LINEではありません。
             </p>
+            <a href={`https://line.me/R/ti/p/${APP_LINE_ID}`} target="_blank" rel="noopener noreferrer"
+              className="mt-2 inline-block text-sm text-emerald-700 underline">{APP_LINE_ID} を友だち追加する</a>
             {ownerCode ? (
               <p className="font-mono text-lg font-bold text-amber-700 mt-2">{ownerCode}</p>
             ) : (
