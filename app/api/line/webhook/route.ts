@@ -9,6 +9,7 @@ import { loadNameCtx, sanitizeParsed, summaryLines, hasEntries, registerParsed, 
 import { collectSiteStatus } from '@/lib/siteStatus'
 import { collectLateEntries } from '@/lib/entryReport'
 import { buildEntryReportFlex } from '@/lib/entryReportFlex'
+import { handleManifestText, handleManifestPostback } from '@/lib/manifestLine'
 
 // LINE 公式アカウントの Webhook。
 // 1) 1対1トークで連携コードが送られてきたら、その人の LINE を作業員に結び付ける（従来どおり）
@@ -97,6 +98,7 @@ type LineEvent = {
   replyToken?: string
   source?: { type: 'user' | 'group' | 'room'; userId?: string; groupId?: string; roomId?: string }
   message?: { type: string; text?: string }
+  postback?: { data?: string }
 }
 
 async function handleLinkCode(event: LineEvent, code: string): Promise<boolean> {
@@ -231,6 +233,29 @@ async function handleStatusRequest(event: LineEvent) {
   await replyMessages(event.replyToken, [buildEntryReportFlex(statuses, date, timeLabel, late)])
 }
 
+// グループの役目。名前に「マニフェスト」が入ったグループだけ、処分の記録として読む。
+// それ以外のグループでは何もしない（別会社の現場の報告が台帳に混ざらないように）。
+// 毎回名前を聞くと遅いので、一度調べたら app_settings に覚えておく
+const MANIFEST_KEYWORD = 'マニフェスト'
+const groupModeKey = (groupId: string) => `line_group_mode:${groupId}`
+
+async function groupMode(groupId: string): Promise<'manifest' | 'none'> {
+  const { data } = await supabase.from('app_settings').select('value').eq('key', groupModeKey(groupId)).maybeSingle()
+  if (data?.value === 'manifest' || data?.value === 'none') return data.value
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN
+  let name = ''
+  if (token) {
+    const res = await fetch(`${LINE_API}/v2/bot/group/${encodeURIComponent(groupId)}/summary`, { headers: { Authorization: `Bearer ${token}` } })
+    if (res.ok) name = ((await res.json()) as { groupName?: string }).groupName ?? ''
+    else console.error('line group summary failed:', res.status)
+  }
+  // 名前が取れなかったときは覚えずに何もしない（次の書き込みでもう一度調べる）
+  if (!name) return 'none'
+  const mode = name.includes(MANIFEST_KEYWORD) ? 'manifest' : 'none'
+  await supabase.from('app_settings').upsert({ key: groupModeKey(groupId), value: mode, updated_at: new Date().toISOString() })
+  return mode
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.text()
   const signature = req.headers.get('x-line-signature')
@@ -246,9 +271,37 @@ export async function POST(req: NextRequest) {
         if (event.replyToken) await reply(event.replyToken, '友達追加ありがとうございます。\nマスタ管理画面で発行された「連携コード」を、このトーク画面にそのまま送信してください。\n現場の報告（人工・廃材・経費）もここに書けば台帳に入ります。')
         return
       }
+      const groupId = event.source?.type === 'group' ? event.source.groupId ?? null : null
+
+      // グループに招待されたとき。マニフェストのグループなら役目を伝える
+      if (event.type === 'join') {
+        if (!groupId || !event.replyToken) return
+        const mode = await groupMode(groupId)
+        await reply(event.replyToken, mode === 'manifest'
+          ? 'このグループの書き込みを、処分（廃材）の記録としてアプリに入れます。\n書き方の例：\n11月9日　現場名　2トン\n処分場　廃材の種類\n0.71t（kg・円でも可）\n違っていたら「取消」と返信してください。'
+          : 'このグループでは、今は何もしません。')
+        return
+      }
+
+      // マニフェストのグループのボタン（現場の選択・それでも入れる・入れない）
+      if (event.type === 'postback') {
+        const messages = await handleManifestPostback(supabase, new URLSearchParams(event.postback?.data ?? ''), groupId)
+        if (messages && event.replyToken) await replyMessages(event.replyToken, messages)
+        return
+      }
+
       if (event.type !== 'message' || event.message?.type !== 'text') return
       const text = (event.message.text ?? '').trim()
       if (!text) return
+
+      // グループ・複数人トーク：マニフェストのグループだけ処分の記録として読み、ほかでは何もしない
+      if (event.source?.type === 'group' || event.source?.type === 'room') {
+        if (!groupId || await groupMode(groupId) !== 'manifest') return
+        if (/^(取消|取り消し|とりけし|キャンセル)$/.test(text)) { await handleCancel(event); return }
+        const messages = await handleManifestText(supabase, { text, groupId, userId: event.source.userId ?? null, eventId: event.webhookEventId ?? null, today: jstToday() })
+        if (messages && event.replyToken) await replyMessages(event.replyToken, messages)
+        return
+      }
 
       // 1対1のトークで「今日の状況」と送られたら記入状況を返す。AI の報告読み取りより先に見る
       if (event.source?.type === 'user' && /^(今日の状況|記入状況|今日の記入状況)$/.test(text)) { await handleStatusRequest(event); return }
