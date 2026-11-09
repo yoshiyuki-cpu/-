@@ -30,7 +30,7 @@ export const scrapMark = (reportId: number) => `（LINE#${reportId}）`
 
 const PROMPTS: Record<PhotoKind, string> = {
   scrap: 'これは解体業者のLINEグループに送られた写真です。スクラップ業者の伝票・計量票・買取明細のどれかなら、内容をJSONで返してください。荷台や品物、人や景色の写真なら {"is_slip": false} だけ返してください。\n{"is_slip": true, "date": "YYYY-MM-DD または null", "vendor": "業者名 または null", "items": [{"name": "品目", "weight": 重量kgの数値またはnull, "amount": 金額の数値またはnull}], "total": 合計金額の数値またはnull}\n読み取れない項目は null。推測で数字を作らない。JSONのみ返す。',
-  fuel: 'これは解体業者のLINEグループに送られた写真です。ガソリンスタンドの給油レシートが写っていれば、内容をJSONで返してください。レシートが無い写真なら {"is_receipt": false} だけ返してください。\n{"is_receipt": true, "date": "YYYY-MM-DD または null", "station": "スタンド名 または null", "liters": 給油量リットルの数値またはnull, "amount": 税込合計金額の数値またはnull, "fuel_type": "軽油" または "レギュラー"（軽油以外のガソリンはレギュラー。分からなければ null）, "plate": "写っている車のナンバーの数字部分（例 42-52）または null"}\n読み取れない項目は null。推測で数字を作らない。JSONのみ返す。',
+  fuel: 'これは解体業者のLINEグループに送られた写真です。ガソリンスタンドの給油レシートが写っていれば、内容をJSONで返してください。レシートが無い写真なら {"is_receipt": false} だけ返してください。\n{"is_receipt": true, "date": "YYYY-MM-DD または null", "station": "スタンド名 または null", "liters": 給油量リットルの数値またはnull, "amount": 税込合計金額の数値またはnull, "fuel_type": "軽油" または "レギュラー"（軽油以外のガソリンはレギュラー。分からなければ null）, "plate": "写っている車のナンバーの数字部分（例 12-34）または null"}\n読み取れない項目は null。推測で数字を作らない。JSONのみ返す。',
 }
 
 async function downloadImage(messageId: string): Promise<{ data: string; mediaType: string } | null> {
