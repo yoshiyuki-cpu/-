@@ -197,6 +197,9 @@ export async function cancelReport(supabase: SupabaseClient, reportId: number): 
     const { data } = await supabase.from(table).delete().eq('line_report_id', reportId).select('id')
     removed += (data ?? []).length
   }
+  // スクラップの台帳には line_report_id の列が無いので、備考の印（LINE#番号）で探す（lib/photoLine.ts の scrapMark）
+  const { data: scrap } = await supabase.from('scrap_records').delete().like('note', `%（LINE#${reportId}）%`).select('id')
+  removed += (scrap ?? []).length
   await supabase.from('line_reports').update({ status: 'cancelled' }).eq('id', reportId)
   return removed
 }

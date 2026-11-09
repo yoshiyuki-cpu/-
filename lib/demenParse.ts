@@ -92,6 +92,8 @@ export function parseDemenText(raw: string, today: string): DemenText | null {
       currentWaste = { disposalText: w[0], typeText: w.slice(1).join(' ') }
       continue
     }
+    // それ以外の見出し（「スクラップ」など1語の行）のあとの金額は、廃材に付けない
+    currentWaste = null
   }
   if (out.labor === null && !out.vehicles.length) return null
   return out
