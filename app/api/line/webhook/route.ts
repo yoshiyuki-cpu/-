@@ -6,6 +6,11 @@ import { jstToday } from '@/lib/date'
 import { projectUrl } from '@/lib/notify'
 import { OWNER_LINE_LINK_CODE_KEY, OWNER_LINE_USER_ID_KEY } from '@/lib/entryReport'
 import { loadNameCtx, sanitizeParsed, summaryLines, hasEntries, registerParsed, cancelReport, fmtDate, NameCtx, Parsed } from '@/lib/lineReport'
+import { collectSiteStatus } from '@/lib/siteStatus'
+import { collectLateEntries } from '@/lib/entryReport'
+import { buildEntryReportFlex } from '@/lib/entryReportFlex'
+import { handleManifestText, handleManifestPostback } from '@/lib/manifestLine'
+import { handleDemenText, handleDemenPostback } from '@/lib/demenLine'
 
 // LINE 公式アカウントの Webhook。
 // 1) 1対1トークで連携コードが送られてきたら、その人の LINE を作業員に結び付ける（従来どおり）
@@ -27,13 +32,20 @@ function verifySignature(body: string, signature: string | null) {
 }
 
 async function reply(replyToken: string, text: string) {
+  await replyMessages(replyToken, [{ type: 'text', text }])
+}
+
+// 返事（reply）は通数に数えられないので、「今日の状況」も返事で返す
+async function replyMessages(replyToken: string, messages: Record<string, unknown>[]) {
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN
   if (!token) return
-  await fetch(`${LINE_API}/v2/bot/message/reply`, {
+  const res = await fetch(`${LINE_API}/v2/bot/message/reply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ replyToken, messages: [{ type: 'text', text }] }),
+    body: JSON.stringify({ replyToken, messages }),
   })
+  // 失敗は握りつぶさずに残す（トークンや署名はログに出さない）
+  if (!res.ok) console.error('line reply failed:', res.status, (await res.text()).slice(0, 300))
 }
 
 // 文章を AI に読ませる。名前は登録済みの一覧から選ばせ、一覧に無いものは unmatched に入れさせる
@@ -87,6 +99,7 @@ type LineEvent = {
   replyToken?: string
   source?: { type: 'user' | 'group' | 'room'; userId?: string; groupId?: string; roomId?: string }
   message?: { type: string; text?: string }
+  postback?: { data?: string }
 }
 
 async function handleLinkCode(event: LineEvent, code: string): Promise<boolean> {
@@ -198,6 +211,54 @@ async function handleReport(event: LineEvent, text: string): Promise<void> {
   }
 }
 
+// 19:30の報告を受け取っている人（社長と、受け取る印の付いた人）か。「今日の状況」はこの人たちだけ
+async function isReportReceiver(userId: string | undefined) {
+  if (!userId) return false
+  const { data: owner } = await supabase.from('app_settings').select('value').eq('key', OWNER_LINE_USER_ID_KEY).maybeSingle()
+  if (owner?.value && owner.value === userId) return true
+  // receives_entry_report の列が無い環境でも落ちないよう、全部取って JS で絞る（entryReport と同じ）
+  const { data: workers } = await supabase.from('workers').select('*').eq('line_user_id', userId)
+  return (workers ?? []).some((w: { receives_entry_report?: boolean }) => w.receives_entry_report === true)
+}
+
+// 「今日の状況」と送られたら、今の記入状況を19:30と同じ形で返す（返事なので通数を使わない）
+async function handleStatusRequest(event: LineEvent) {
+  if (!event.replyToken) return
+  if (!await isReportReceiver(event.source?.userId)) {
+    await reply(event.replyToken, '記入状況は、19時30分の報告を受け取っている人だけが見られます。')
+    return
+  }
+  const date = jstToday()
+  const timeLabel = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: 'numeric', minute: '2-digit' }).format(new Date())
+  const [statuses, late] = await Promise.all([collectSiteStatus(supabase, date), collectLateEntries(supabase, date)])
+  await replyMessages(event.replyToken, [buildEntryReportFlex(statuses, date, timeLabel, late)])
+}
+
+// グループの役目。名前に「マニフェスト」が入ったグループは処分の記録、
+// 「出面」か「経費確認」が入ったグループは1日のまとめ（人工・車両代）として読む。
+// それ以外のグループでは何もしない（別会社の現場の報告が台帳に混ざらないように）。
+// 毎回名前を聞くと遅いので、一度調べたら app_settings に覚えておく
+const MANIFEST_KEYWORD = 'マニフェスト'
+const groupModeKey = (groupId: string) => `line_group_mode:${groupId}`
+
+type GroupMode = 'manifest' | 'demen' | 'none'
+async function groupMode(groupId: string): Promise<GroupMode> {
+  const { data } = await supabase.from('app_settings').select('value').eq('key', groupModeKey(groupId)).maybeSingle()
+  if (data?.value === 'manifest' || data?.value === 'demen' || data?.value === 'none') return data.value
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN
+  let name = ''
+  if (token) {
+    const res = await fetch(`${LINE_API}/v2/bot/group/${encodeURIComponent(groupId)}/summary`, { headers: { Authorization: `Bearer ${token}` } })
+    if (res.ok) name = ((await res.json()) as { groupName?: string }).groupName ?? ''
+    else console.error('line group summary failed:', res.status)
+  }
+  // 名前が取れなかったときは覚えずに何もしない（次の書き込みでもう一度調べる）
+  if (!name) return 'none'
+  const mode: GroupMode = name.includes(MANIFEST_KEYWORD) ? 'manifest' : /出面|経費確認/.test(name) ? 'demen' : 'none'
+  await supabase.from('app_settings').upsert({ key: groupModeKey(groupId), value: mode, updated_at: new Date().toISOString() })
+  return mode
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.text()
   const signature = req.headers.get('x-line-signature')
@@ -213,9 +274,45 @@ export async function POST(req: NextRequest) {
         if (event.replyToken) await reply(event.replyToken, '友達追加ありがとうございます。\nマスタ管理画面で発行された「連携コード」を、このトーク画面にそのまま送信してください。\n現場の報告（人工・廃材・経費）もここに書けば台帳に入ります。')
         return
       }
+      const groupId = event.source?.type === 'group' ? event.source.groupId ?? null : null
+
+      // グループに招待されたとき。マニフェストのグループなら役目を伝える
+      if (event.type === 'join') {
+        if (!groupId || !event.replyToken) return
+        const mode = await groupMode(groupId)
+        await reply(event.replyToken, mode === 'demen'
+          ? 'このグループの1日のまとめを、人工と車両代としてアプリに入れます。廃材は台帳に入れず、マニフェストとの照合に使います。\n「計○人工」などの累計は台帳と比べ、ずれていればお知らせします。\n違っていたら「取消」と返信してください。'
+          : mode === 'manifest'
+          ? 'このグループの書き込みを、処分（廃材）の記録としてアプリに入れます。\n書き方の例：\n11月9日　現場名　2トン\n処分場　廃材の種類\n0.71t（kg・円でも可）\n違っていたら「取消」と返信してください。'
+          : 'このグループでは、今は何もしません。')
+        return
+      }
+
+      // マニフェストのグループのボタン（現場の選択・それでも入れる・入れない）
+      if (event.type === 'postback') {
+        const params = new URLSearchParams(event.postback?.data ?? '')
+        const messages = await handleManifestPostback(supabase, params, groupId) ?? await handleDemenPostback(supabase, params, groupId)
+        if (messages && event.replyToken) await replyMessages(event.replyToken, messages)
+        return
+      }
+
       if (event.type !== 'message' || event.message?.type !== 'text') return
       const text = (event.message.text ?? '').trim()
       if (!text) return
+
+      // グループ・複数人トーク：マニフェストのグループだけ処分の記録として読み、ほかでは何もしない
+      if (event.source?.type === 'group' || event.source?.type === 'room') {
+        const mode = groupId ? await groupMode(groupId) : 'none'
+        if (!groupId || mode === 'none') return
+        if (/^(取消|取り消し|とりけし|キャンセル)$/.test(text)) { await handleCancel(event); return }
+        const input = { text, groupId, userId: event.source.userId ?? null, eventId: event.webhookEventId ?? null, today: jstToday() }
+        const messages = mode === 'manifest' ? await handleManifestText(supabase, input) : await handleDemenText(supabase, input)
+        if (messages && event.replyToken) await replyMessages(event.replyToken, messages)
+        return
+      }
+
+      // 1対1のトークで「今日の状況」と送られたら記入状況を返す。AI の報告読み取りより先に見る
+      if (event.source?.type === 'user' && /^(今日の状況|記入状況|今日の記入状況)$/.test(text)) { await handleStatusRequest(event); return }
 
       // 連携コード（英数6文字）は先に試す。1対1のトークでしか来ない前提だが、グループでも害はない
       if (/^[A-Z0-9]{6}$/i.test(text) && await handleLinkCode(event, text.toUpperCase())) return

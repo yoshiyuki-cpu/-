@@ -180,6 +180,11 @@ export async function sendReminderPush(supabase: SupabaseClient, workerId: numbe
 }
 
 export async function sendLineMessage(lineUserId: string, text: string) {
+  await sendLineMessages(lineUserId, [{ type: 'text', text }])
+}
+
+// 文字以外（Flex Message など）も送れる版。失敗は投げるので、呼ぶ側で文字だけの送信へ逃がせる
+export async function sendLineMessages(lineUserId: string, messages: Record<string, unknown>[]) {
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN
   if (!token) return
   // 手元の動作確認では LINE の代わりのサーバーに向けられる（LINE_API_BASE）
@@ -189,7 +194,7 @@ export async function sendLineMessage(lineUserId: string, text: string) {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ to: lineUserId, messages: [{ type: 'text', text }] }),
+    body: JSON.stringify({ to: lineUserId, messages }),
   })
   if (!res.ok) {
     const body = await res.text()
