@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { loadManifestCtx, LineMessage } from '@/lib/manifestLine'
 import { fmtDate, Parsed } from '@/lib/lineReport'
+import { pickFuelPrice, fuelAmount, fuelPriceNote, MonthlyFuelPrice, BaseFuelPrice } from '@/lib/fuelPrice'
 
 // 「スクラップ」「燃料カード」のグループに送られた写真を読み、台帳に入れる（2026-11 社長の依頼）。社長の決めごと：
 // ・伝票（スクラップ業者の計量票）やレシート（給油）だけを読む。荷台や品物の写真は黙って飛ばす（記録もしない）
@@ -9,11 +10,13 @@ import { fmtDate, Parsed } from '@/lib/lineReport'
 // ・同じ日に同じ金額の記録がアプリにあれば、二重かもしれないので「それでも入れる／入れない」を聞く
 // ・返事はすべて reply（通数を使わない）。違っていたら「取消」で消せる
 // LINE の仕組みで、アルバムに追加した写真は公式LINEに届かない。トークに直接送った写真だけ読める。
+// 燃料はガソリンカードで入れていてレシートに金額が出ないので、リットル数 × 給油した月の単価（lib/fuelPrice.ts）で燃料代を出す。
+// 油種かリットル数が読めないときだけ、レシートに書かれた金額を使う。
 
 export type PhotoKind = 'scrap' | 'fuel'
 type ScrapRead = { is_slip: boolean; date: string | null; vendor: string | null; items: { name: string; weight: number | null; amount: number | null }[]; total: number | null }
 type FuelRead = { is_receipt: boolean; date: string | null; station: string | null; liters: number | null; amount: number | null; fuel_type: '軽油' | 'レギュラー' | null; plate: string | null }
-type PhotoExtra = { kind: PhotoKind; scrap?: ScrapRead; fuel?: FuelRead; amount: number }
+type PhotoExtra = { kind: PhotoKind; scrap?: ScrapRead; fuel?: FuelRead; amount: number; literPrice?: number; priceNote?: string }
 type PhotoParsed = Parsed & { photo?: PhotoExtra }
 type ReportRow = { id: number; status: string; line_group_id: string | null; project_id: number | null; parsed: PhotoParsed | null }
 
@@ -89,6 +92,16 @@ function describe(x: PhotoExtra) {
   }
   const f = x.fuel as FuelRead
   return `${f.station ? `${f.station}　` : ''}${f.fuel_type ?? '油種不明'} ${f.liters !== null ? `${f.liters}L ` : ''}${yen(x.amount)}${f.plate ? `　車 ${f.plate}` : ''}`
+    + (x.priceNote ? `\n（${x.priceNote}）` : '')
+}
+
+// 給油した月の単価を引く。月ごとの単価の表がまだ無い環境では基本単価だけで決める
+async function loadFuelPrices(supabase: SupabaseClient): Promise<{ monthly: MonthlyFuelPrice[]; base: BaseFuelPrice[] }> {
+  const [{ data: m }, { data: b }] = await Promise.all([
+    supabase.from('fuel_monthly_prices').select('month, fuel_type, unit_price'),
+    supabase.from('fuel_prices').select('fuel_type, unit_price'),
+  ])
+  return { monthly: (m ?? []) as MonthlyFuelPrice[], base: (b ?? []) as BaseFuelPrice[] }
 }
 
 export async function handlePhoto(
@@ -107,11 +120,28 @@ export async function handlePhoto(
   // 伝票・レシートではない写真は黙って飛ばす（記録もしない）
   if (!scrap && !fuel) return null
   const label = input.kind === 'scrap' ? 'スクラップの伝票' : '給油のレシート'
-  const amount = scrap?.total ?? fuel?.amount ?? null
-  if (amount === null || amount <= 0) return [text(`${label}の写真を受け取りましたが、金額が読み取れませんでした。台帳には入れていません。\n明るい場所で、伝票全体が入るように撮り直して送ってください。`)]
-
   const date = pickDate(scrap?.date ?? fuel?.date ?? null, input.today)
-  const extra: PhotoExtra = { kind: input.kind, scrap: scrap ?? undefined, fuel: fuel ?? undefined, amount }
+  let amount = scrap?.total ?? fuel?.amount ?? null
+  let literPrice: number | undefined
+  let priceNote: string | undefined
+  if (fuel && fuel.liters !== null && fuel.liters > 0 && fuel.fuel_type) {
+    const { monthly, base } = await loadFuelPrices(supabase)
+    const hit = pickFuelPrice(date, fuel.fuel_type, monthly, base)
+    if (hit) {
+      amount = fuelAmount(fuel.liters, hit.price)
+      literPrice = hit.price
+      priceNote = fuelPriceNote(hit)
+    }
+  }
+  if (amount === null || amount <= 0) {
+    if (fuel) {
+      const missing = fuel.liters === null || fuel.liters <= 0 ? '給油量（リットル）' : '油種（軽油かレギュラーか）'
+      return [text(`${label}の写真を受け取りましたが、${missing}が読み取れませんでした。台帳には入れていません。\n明るい場所で、レシート全体が入るように撮り直して送るか、アプリから入れてください。`)]
+    }
+    return [text(`${label}の写真を受け取りましたが、金額が読み取れませんでした。台帳には入れていません。\n明るい場所で、伝票全体が入るように撮り直して送ってください。`)]
+  }
+
+  const extra: PhotoExtra = { kind: input.kind, scrap: scrap ?? undefined, fuel: fuel ?? undefined, amount, literPrice, priceNote }
   const parsed: PhotoParsed = { is_report: true, project_id: null, date, labor: [], waste: [], others: [], unmatched: [], photo: extra }
   let workerId: number | null = null
   if (input.userId) {

@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useDesign, setDesign } from '@/lib/design'
 import { useLayout, setLayout } from '@/lib/layout'
 import BillingLink from '@/app/billing/BillingLink'
+import MonthlyFuelPrices from './MonthlyFuelPrices'
 
 type Worker = {
   id: number; name: string; company_name: string | null; email: string | null; is_foreman: boolean
@@ -771,11 +772,12 @@ export default function MasterPage() {
         </section>
       )}
 
+      {tab === 'fuel' && <MonthlyFuelPrices />}
       {tab === 'fuel' && (
         <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-          <h2 className="font-bold mb-3 text-gray-700">燃料単価</h2>
+          <h2 className="font-bold mb-3 text-gray-700">基本単価（予備）</h2>
           <p className="text-xs text-gray-500 mb-3">
-            記録入力の燃料代で種類（軽油／レギュラー）を選ぶと、ここで設定した単価が自動入力されます。相場が変わったらここで基本単価を更新してください。入力時にその場で単価を上書きすることもできます。
+            上の月ごとの単価がまだ一度も入っていないときだけ使います。記録入力の画面では、その場で単価を上書きすることもできます。
           </p>
           <div className="flex flex-col gap-1">
             {fuelPrices.map(fp => (
