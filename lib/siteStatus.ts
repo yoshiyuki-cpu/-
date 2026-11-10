@@ -54,12 +54,15 @@ export async function collectSiteStatus(supabase: SupabaseClient, date: string):
 }
 
 // 記入済み：KY活動・議事録・（求める日は）道具の確認・人工がそろっている（処分代は毎日出るとは限らないので条件にしない）
-// 休工：休工の印があり、何も入っていない（印があっても記入があれば、ふだんどおりに分ける）
+// 休工：休工の印があり、朝の分も人工も入っていない（前の日の宵積みの処分代・経費だけはあってよい）
+//       印があっても KY・議事録・人工が入っていれば、動いた日としてふだんどおりに分ける
 // 記録なし：何ひとつ入っていない（休工の印を付け忘れた日もある）
 // 抜けあり：それ以外
 export function classify(s: SiteStatus): 'done' | 'missing' | 'none' | 'off' {
-  const any = s.ky || s.minutes || s.tools || s.labor > 0 || s.waste > 0 || s.other > 0
-  if (!any) return s.off ? 'off' : 'none'
+  const worked = s.ky || s.minutes || s.tools || s.labor > 0
+  if (s.off && !worked) return 'off'
+  const any = worked || s.waste > 0 || s.other > 0
+  if (!any) return 'none'
   if (s.ky && s.minutes && (s.tools || !s.toolsRequired) && s.labor > 0) return 'done'
   return 'missing'
 }

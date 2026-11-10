@@ -196,7 +196,7 @@ export default function Today() {
             <div className="flex flex-col mt-1">
               {off.map(s => (
                 <div key={s.id} className="flex justify-between items-center gap-2 py-1.5 text-sm text-gray-500">
-                  <span className="truncate">{s.name}</span>
+                  <span className="truncate">{s.name}{s.waste > 0 ? `（処分${s.waste}件）` : ''}</span>
                   <button onClick={() => toggleOff(s.id, today, false)} disabled={offBusy === `${s.id}:${today}`}
                     className="shrink-0 text-xs text-blue-600 underline px-2 py-1.5 disabled:opacity-50">取り消す</button>
                 </div>
@@ -307,9 +307,10 @@ export default function Today() {
             <div key={s.id} className="bg-gray-50 rounded-2xl border border-gray-100 p-3">
               <div className="flex justify-between items-center gap-2">
                 <Link href={`/projects/${s.id}`} className="font-bold truncate text-gray-500">{s.name}</Link>
-                <Chip done={null}>今日は休工</Chip>
+                <Chip done={null}>今日は休工{s.waste > 0 ? `・処分${s.waste}件` : ''}</Chip>
               </div>
-              <div className="flex flex-wrap justify-end gap-2 mt-2">
+              <div className="flex flex-wrap justify-end items-center gap-2 mt-2">
+                <Link href={`/projects/${s.id}/today`} className="text-xs font-bold rounded-lg border border-gray-300 px-3 py-1.5 text-gray-700 mr-auto">宵積みの処分代を入れる</Link>
                 <button onClick={() => toggleOff(s.id, today, false)} disabled={offBusy === `${s.id}:${today}`}
                   className="text-xs text-blue-600 underline px-2 py-1.5 disabled:opacity-50">休工を取り消す</button>
                 {tomorrowButton}

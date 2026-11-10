@@ -57,7 +57,7 @@ export function buildEntryReportFlex(statuses: SiteStatus[], date: string, timeL
     if (missing.length) body.push(section(`■ 抜けがある現場 ${missing.length}`, '#b91c1c', siteRows(missing, true, true)))
     if (none.length) body.push(section(`■ 今日の記録なし（休工の印なし） ${none.length}`, '#b45309', siteRows(none, false, true, date)))
     if (done.length) body.push(section(`■ 記入済み ${done.length}`, '#047857', siteRows(done, withDoneDetail, false)))
-    if (off.length) body.push(section(`■ 休工 ${off.length}`, '#6b7280', [text(off.map(s => s.name).join('、'), { size: 'xs', color: '#6b7280' })]))
+    if (off.length) body.push(section(`■ 休工 ${off.length}`, '#6b7280', [text(off.map(s => `${s.name}${s.waste > 0 ? `（処分${s.waste}件）` : ''}`).join('、'), { size: 'xs', color: '#6b7280' })]))
     if (late.length) body.push(section(`■ 後入れ（前の日の入れ忘れ） ${late.length}`, '#4b5563', late.slice(0, MAX_ROWS).map(l => text(l, { size: 'xs', color: '#374151' }))))
     if (!statuses.length) body.push(text('進行中の現場がありません。'))
     body.push(text(`${timeLabel}時点の集計です。それより後の記入は入っていません。`, { size: 'xxs', color: '#9ca3af' }))

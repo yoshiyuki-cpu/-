@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { supabase, WasteType } from '@/lib/supabase'
 import { jstToday, jstDateOffset } from '@/lib/date'
 import { isOffline, isNetworkError, enqueue } from '@/lib/offlineQueue'
-import { loadGate, gateOpen, GateState, LATE_PREFIX } from '@/lib/morningGate'
+import { loadGate, gateOpen, wasteGateOpen, GateState, LATE_PREFIX } from '@/lib/morningGate'
 import { logAction } from '@/lib/audit'
 import MorningGateBlock from '../MorningGateBlock'
 
@@ -147,8 +147,11 @@ export default function TodayEntryPage() {
 
   const late = date < jstToday()
   const show = (p: Part) => !late || parts.includes(p)
-  const open = gate ? gateOpen(gate) : false
-  const laborRows = open && show('labor') ? Object.entries(labor).filter(([w]) => !(Number(w) in laborDone)) : []
+  // 休工の日は、朝の分が済んでいなくても処分代（前の日の宵積み）と経費だけは入れられる。人工は出さない
+  const fullOpen = gate ? gateOpen(gate) : false
+  const open = gate ? wasteGateOpen(gate) : false
+  const dayOffOnly = open && !fullOpen
+  const laborRows = fullOpen && show('labor') ? Object.entries(labor).filter(([w]) => !(Number(w) in laborDone)) : []
   const wasteRows = open && show('waste') ? typeRows.filter(t => Number(qty[t.id]) > 0) : []
   const expenseAmount = show('expense') ? Number(expense.amount) || 0 : 0
   const laborTotal = laborRows.reduce((s, [, d]) => s + (d === 'half' ? LABOR_UNIT_PRICE_HALF : LABOR_UNIT_PRICE), 0)
@@ -174,7 +177,7 @@ export default function TodayEntryPage() {
     if (laborRows.length || wasteRows.length) {
       // 押す直前にもう一度、朝の分と、同じ日の人工を確かめる（別の端末で入れた分を重ねない）
       const g = await loadGate(supabase, projectId, date)
-      if (!gateOpen(g)) { setGate(g); setSaving(false); return }
+      if ((laborRows.length && !gateOpen(g)) || (wasteRows.length && !wasteGateOpen(g))) { setGate(g); setSaving(false); return }
     }
     if (laborRows.length) {
       let already = new Set(Object.keys(laborDone).map(Number))
@@ -282,7 +285,12 @@ export default function TodayEntryPage() {
 
       {gate && open && (
         <>
-          {show('labor') && <section className="bg-white rounded-2xl border border-gray-100 p-3" aria-labelledby="sec-labor">
+          {dayOffOnly && (
+            <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2">
+              この日は休工です。前の日の宵積みなどの処分代と経費は、KY活動・議事録なしで入れられます（人工は入れられません。動いた日なら休工を取り消してください）。
+            </p>
+          )}
+          {show('labor') && fullOpen && <section className="bg-white rounded-2xl border border-gray-100 p-3" aria-labelledby="sec-labor">
             <div className="flex justify-between items-baseline">
               <h2 id="sec-labor" className="text-sm font-bold text-gray-700">人工</h2>
               <span className="text-[11px] text-gray-500">押すたびに 全日 → 半日 → 外す</span>

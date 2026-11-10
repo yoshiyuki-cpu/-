@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { loadGate, gateOpen, gateMissing } from '@/lib/morningGate'
+import { loadGate, gateOpen, wasteGateOpen, gateMissing } from '@/lib/morningGate'
 
 // LINE からの報告を台帳に入れる部品。サーバー（Webhook）とアプリの「LINE報告」画面の両方から使う。
 // ここには Anthropic SDK を入れない（画面側でも import するため）。読み取り（AI）は API ルート側。
@@ -138,9 +138,10 @@ export async function registerParsed(
   const skippedLabor: string[] = []
 
   // 朝の KY活動・議事録がまだなら、人工・処分代は入れない（入力画面と同じ決まり）。何も入れずに止める
+  // 休工の日の処分代（前の日の宵積み）だけは止めない
   if (p.labor.length || p.waste.length) {
     const g = await loadGate(supabase, projectId, p.date)
-    if (!gateOpen(g)) throw new Error(`gate:${gateMissing(g)}`)
+    if (p.labor.length ? !gateOpen(g) : !wasteGateOpen(g)) throw new Error(`gate:${gateMissing(g)}`)
   }
 
   if (p.labor.length) {
