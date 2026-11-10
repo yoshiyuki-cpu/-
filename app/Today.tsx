@@ -2,9 +2,10 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import { jstToday } from '@/lib/date'
+import { jstToday, jstDateOffset } from '@/lib/date'
 import { useDeviceUser, OWNER_USER } from '@/lib/user'
 import { collectSiteStatus, classify, SiteStatus } from '@/lib/siteStatus'
+import { loadOffIds, setSiteOff } from '@/lib/siteOff'
 import { buildMonthlyReport } from '@/lib/monthlyReport'
 
 // ホームの「今日」。現場の一日の3つの時刻に合わせて、そのとき押すべきものだけを上に出す。
@@ -12,6 +13,7 @@ import { buildMonthlyReport } from '@/lib/monthlyReport'
 //   夕方（12時〜）… 人工・処分代がまだの現場が上。「今日の記入」から1画面で入れる
 //   社長・難波君 … 記入状況（抜け・済み・記録なし）と、LINE の確認待ち、今月の差引
 // 黄色は「まだ」だけに使う。済んだら緑、動きのないものは灰色。
+// 現場を空ける日は「休工」を押す（今日・明日）。その現場は朝夕のお知らせから外れ、19:30では「休工」に並ぶ（lib/siteOff.ts）。
 
 type Phase = 'morning' | 'evening'
 type WorkerRow = { id: number; name: string; is_foreman?: boolean; receives_entry_report?: boolean }
@@ -44,19 +46,38 @@ export default function Today() {
   const [month, setMonth] = useState<{ profit: number; total: number } | null>(null)
   const [loading, setLoading] = useState(true)
   const [asSite, setAsSite] = useState(false) // 社長が「職長の画面」を見るとき
+  // 休工の印（lib/siteOff.ts）。今日の分は statuses[].off、明日の分はここ
+  const tomorrow = jstDateOffset(1)
+  const [offTomorrow, setOffTomorrow] = useState<Set<number>>(new Set())
+  const [showTomorrow, setShowTomorrow] = useState(false)
+  const [offBusy, setOffBusy] = useState<string | null>(null)
+  const [offError, setOffError] = useState('')
+
+  async function toggleOff(projectId: number, date: string, off: boolean) {
+    const key = `${projectId}:${date}`
+    if (offBusy) return
+    setOffBusy(key); setOffError('')
+    const ok = await setSiteOff(supabase, projectId, date, off, user?.name ?? null)
+    setOffBusy(null)
+    if (!ok) { setOffError('休工の印を付けられませんでした。通信を確かめて、もう一度押してください。'); return }
+    if (date === today) setStatuses(list => list.map(s => (s.id === projectId ? { ...s, off } : s)))
+    else setOffTomorrow(prev => { const next = new Set(prev); if (off) next.add(projectId); else next.delete(projectId); return next })
+  }
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      const [st, { data: wk }, { data: fp }, { data: mn }, lr] = await Promise.all([
+      const [st, { data: wk }, { data: fp }, { data: mn }, lr, offT] = await Promise.all([
         collectSiteStatus(supabase, today),
         supabase.from('workers').select('*').order('name'),
         supabase.from('foreman_projects').select('worker_id, project_id'),
         supabase.from('meeting_notes').select('project_id, date, danger_points').order('date', { ascending: false }).limit(300),
         supabase.from('line_reports').select('id').eq('status', 'pending').limit(50),
+        loadOffIds(supabase, jstDateOffset(1)),
       ])
       if (cancelled) return
       setStatuses(st)
+      setOffTomorrow(offT)
       setWorkers((wk ?? []) as WorkerRow[])
       setLinks((fp ?? []) as { worker_id: number; project_id: number }[])
       // 現場ごとに一番新しい議事録の危険箇所
@@ -93,6 +114,7 @@ export default function Today() {
     const missing = statuses.filter(s => classify(s) === 'missing')
     const done = statuses.filter(s => classify(s) === 'done')
     const none = statuses.filter(s => classify(s) === 'none')
+    const off = statuses.filter(s => classify(s) === 'off')
     return (
       <div className="flex flex-col gap-3">
         <div className="flex items-baseline justify-between">
@@ -108,6 +130,7 @@ export default function Today() {
           <div className="bg-white border border-gray-100 rounded-xl py-2.5"><p className="text-2xl font-bold font-mono text-emerald-700">{done.length}</p><p className="text-[11px] font-bold text-gray-500">記入済み</p></div>
           <div className="bg-white border border-gray-100 rounded-xl py-2.5"><p className="text-2xl font-bold font-mono text-gray-400">{none.length}</p><p className="text-[11px] font-bold text-gray-500">記録なし</p></div>
         </div>
+        {off.length > 0 && <p className="text-[11px] text-gray-500 -mt-1">ほかに休工 {off.length}現場</p>}
 
         {missing.map(s => (
           <Link key={s.id} href={`/projects/${s.id}`} className="block bg-white rounded-2xl border border-amber-400 p-3">
@@ -149,12 +172,62 @@ export default function Today() {
           </div>
         )}
 
+        {offError && <p className="text-sm text-red-600">{offError}</p>}
+
         {none.length > 0 && (
           <div className="bg-white rounded-2xl border border-gray-100 p-3">
-            <p className="text-xs font-bold text-gray-500">今日の記録なし（休工？）　{none.length}現場</p>
-            <p className="text-sm text-gray-600 mt-1 leading-relaxed">{none.map(s => s.name).join('・')}</p>
+            <p className="text-xs font-bold text-gray-500">今日の記録なし　{none.length}現場</p>
+            <p className="text-[11px] text-gray-500 mt-0.5">休みの現場は「休工」を押すと、その日のお知らせが止まります。</p>
+            <div className="flex flex-col mt-1">
+              {none.map(s => (
+                <div key={s.id} className="flex justify-between items-center gap-2 py-1.5 text-sm">
+                  <Link href={`/projects/${s.id}`} className="truncate">{s.name}</Link>
+                  <button onClick={() => toggleOff(s.id, today, true)} disabled={offBusy === `${s.id}:${today}`}
+                    className="shrink-0 text-xs font-bold rounded-lg border border-gray-300 px-3 py-1.5 text-gray-700 disabled:opacity-50">休工</button>
+                </div>
+              ))}
+            </div>
           </div>
         )}
+
+        {off.length > 0 && (
+          <div className="bg-gray-50 rounded-2xl border border-gray-100 p-3">
+            <p className="text-xs font-bold text-gray-500">今日は休工　{off.length}現場</p>
+            <div className="flex flex-col mt-1">
+              {off.map(s => (
+                <div key={s.id} className="flex justify-between items-center gap-2 py-1.5 text-sm text-gray-500">
+                  <span className="truncate">{s.name}</span>
+                  <button onClick={() => toggleOff(s.id, today, false)} disabled={offBusy === `${s.id}:${today}`}
+                    className="shrink-0 text-xs text-blue-600 underline px-2 py-1.5 disabled:opacity-50">取り消す</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="bg-white rounded-2xl border border-gray-100 p-3">
+          <button onClick={() => setShowTomorrow(v => !v)} className="w-full flex justify-between items-center text-xs font-bold text-gray-500">
+            <span>明日（{dayLabel(tomorrow)}）の休工{offTomorrow.size ? `　${offTomorrow.size}現場` : ''}</span>
+            <span className="text-blue-600">{showTomorrow ? '閉じる' : '決める'}</span>
+          </button>
+          {showTomorrow && (
+            <div className="flex flex-col mt-1">
+              <p className="text-[11px] text-gray-500 mb-1">前の日に決めておくと、朝7:50のお知らせからその現場が外れます。</p>
+              {statuses.map(s => {
+                const on = offTomorrow.has(s.id)
+                return (
+                  <div key={s.id} className="flex justify-between items-center gap-2 py-1.5 text-sm">
+                    <span className={`truncate ${on ? 'text-gray-400' : ''}`}>{s.name}</span>
+                    <button onClick={() => toggleOff(s.id, tomorrow, !on)} disabled={offBusy === `${s.id}:${tomorrow}`} aria-pressed={on}
+                      className={`shrink-0 text-xs font-bold rounded-lg border px-3 py-1.5 disabled:opacity-50 ${on ? 'bg-gray-700 border-gray-700 text-white' : 'border-gray-300 text-gray-700'}`}>
+                      {on ? '休工 ✓' : '休工'}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
 
         <Link href="/report" className="block bg-white rounded-2xl border border-gray-100 p-3">
           <div className="flex justify-between items-center">
@@ -174,7 +247,7 @@ export default function Today() {
   // ───────── 職長の画面 ─────────
   const mine = user && user.id > 0 ? links.filter(l => l.worker_id === user.id).map(l => l.project_id) : []
   const sites = mine.length ? statuses.filter(s => mine.includes(s.id)) : statuses
-  const needs = (s: SiteStatus) => (phase === 'morning' ? !morningDone(s) : classify(s) !== 'done')
+  const needs = (s: SiteStatus) => (classify(s) === 'off' ? false : phase === 'morning' ? !morningDone(s) : classify(s) !== 'done')
   const ordered = [...sites].sort((a, b) => Number(needs(b)) - Number(needs(a)))
   const remaining = sites.filter(needs).length
 
@@ -217,9 +290,33 @@ export default function Today() {
 
       {ordered.length === 0 && <p className="text-gray-400 text-center py-10 text-sm">進行中の現場がありません。</p>}
 
+      {offError && <p className="text-sm text-red-600">{offError}</p>}
+
       {ordered.map(s => {
         const mDone = morningDone(s)
         const status = classify(s)
+        const offT = offTomorrow.has(s.id)
+        const tomorrowButton = (
+          <button onClick={() => toggleOff(s.id, tomorrow, !offT)} disabled={offBusy === `${s.id}:${tomorrow}`} aria-pressed={offT}
+            className={`text-xs font-bold rounded-lg border px-3 py-1.5 disabled:opacity-50 ${offT ? 'bg-gray-700 border-gray-700 text-white' : 'border-gray-300 text-gray-600'}`}>
+            {offT ? '明日は休工 ✓' : '明日は休工'}
+          </button>
+        )
+        if (status === 'off') {
+          return (
+            <div key={s.id} className="bg-gray-50 rounded-2xl border border-gray-100 p-3">
+              <div className="flex justify-between items-center gap-2">
+                <Link href={`/projects/${s.id}`} className="font-bold truncate text-gray-500">{s.name}</Link>
+                <Chip done={null}>今日は休工</Chip>
+              </div>
+              <div className="flex flex-wrap justify-end gap-2 mt-2">
+                <button onClick={() => toggleOff(s.id, today, false)} disabled={offBusy === `${s.id}:${today}`}
+                  className="text-xs text-blue-600 underline px-2 py-1.5 disabled:opacity-50">休工を取り消す</button>
+                {tomorrowButton}
+              </div>
+            </div>
+          )
+        }
         const need = needs(s)
         const firstMissing = !s.ky ? { label: 'KY写真を撮る', href: `/projects/${s.id}/ky` }
           : !s.minutes ? { label: '議事録を書く', href: `/projects/${s.id}/minutes` }
@@ -258,6 +355,13 @@ export default function Today() {
               className={`mt-3 flex items-center justify-center min-h-12 rounded-xl font-bold text-base ${firstMissing && !s.unlocked ? 'bg-amber-400 text-gray-900' : 'bg-blue-900 text-white'}`}>
               {action.label}
             </Link>
+            <div className="flex flex-wrap justify-end gap-2 mt-2">
+              {status === 'none' && (
+                <button onClick={() => toggleOff(s.id, today, true)} disabled={offBusy === `${s.id}:${today}`}
+                  className="text-xs font-bold rounded-lg border border-gray-300 px-3 py-1.5 text-gray-600 disabled:opacity-50">今日は休工</button>
+              )}
+              {tomorrowButton}
+            </div>
           </div>
         )
       })}

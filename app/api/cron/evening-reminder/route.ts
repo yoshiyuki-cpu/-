@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { jstToday } from '@/lib/date'
 import { fetchForemanTargets, fetchPrTargets, buildPrReminderLines, sendReminderEmail, sendReminderPush, sendLineMessage, projectUrl, isJstSunday, notifyTomorrowCalendarEvents } from '@/lib/notify'
 
 export const maxDuration = 30
@@ -15,7 +16,8 @@ function isAuthorized(req: NextRequest) {
 async function runEntryReminder() {
   if (isJstSunday()) return 0
 
-  const targets = await fetchForemanTargets(supabase)
+  // 休工の印がある現場は知らせない（lib/siteOff.ts）
+  const targets = await fetchForemanTargets(supabase, jstToday())
 
   await Promise.all(targets.map(async t => {
     const lines = [

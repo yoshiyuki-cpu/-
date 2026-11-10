@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { TOOLS_START } from '@/lib/morningGate'
+import { loadOffIds } from '@/lib/siteOff'
 
 // 現場ごとの「今日の記入状況」。19:30の報告（サーバー）と「今日」の画面（端末）の両方で使う。
 // ここにはメール・LINE の送信部品を入れない（端末側でも読み込むため）。
@@ -15,10 +16,11 @@ export type SiteStatus = {
   waste: number     // 件数
   other: number     // 件数
   unlocked: boolean // 社長が合言葉で解除した
+  off: boolean      // 休工の印がある（lib/siteOff.ts）
 }
 
 export async function collectSiteStatus(supabase: SupabaseClient, date: string): Promise<SiteStatus[]> {
-  const [{ data: pj }, { data: ky }, { data: mn }, { data: lb }, { data: ws }, { data: ot }, { data: un }, tc] = await Promise.all([
+  const [{ data: pj }, { data: ky }, { data: mn }, { data: lb }, { data: ws }, { data: ot }, { data: un }, tc, offIds] = await Promise.all([
     supabase.from('projects').select('*').order('name'),
     supabase.from('ky_photos').select('project_id').eq('date', date),
     supabase.from('meeting_notes').select('project_id').eq('date', date),
@@ -27,6 +29,7 @@ export async function collectSiteStatus(supabase: SupabaseClient, date: string):
     supabase.from('other_entries').select('project_id').eq('date', date),
     supabase.from('app_settings').select('key').like('key', `morning_gate_unlock:%:${date}`),
     supabase.from('tool_checks').select('project_id').eq('date', date),
+    loadOffIds(supabase, date),
   ])
   const toolsRequired = date >= TOOLS_START && !tc.error
   const ids = (rows: unknown[] | null) => (rows ?? []).map(r => (r as { project_id: number }).project_id)
@@ -46,15 +49,17 @@ export async function collectSiteStatus(supabase: SupabaseClient, date: string):
     waste: count(wsIds, p.id),
     other: count(otIds, p.id),
     unlocked: unlockedIds.includes(p.id),
+    off: offIds.has(p.id),
   }))
 }
 
 // 記入済み：KY活動・議事録・（求める日は）道具の確認・人工がそろっている（処分代は毎日出るとは限らないので条件にしない）
-// 記録なし：何ひとつ入っていない（休工の日もある）
+// 休工：休工の印があり、何も入っていない（印があっても記入があれば、ふだんどおりに分ける）
+// 記録なし：何ひとつ入っていない（休工の印を付け忘れた日もある）
 // 抜けあり：それ以外
-export function classify(s: SiteStatus): 'done' | 'missing' | 'none' {
+export function classify(s: SiteStatus): 'done' | 'missing' | 'none' | 'off' {
   const any = s.ky || s.minutes || s.tools || s.labor > 0 || s.waste > 0 || s.other > 0
-  if (!any) return 'none'
+  if (!any) return s.off ? 'off' : 'none'
   if (s.ky && s.minutes && (s.tools || !s.toolsRequired) && s.labor > 0) return 'done'
   return 'missing'
 }

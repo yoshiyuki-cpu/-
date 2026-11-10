@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { jstToday } from '@/lib/date'
 import { fetchUsageEvents, computeUsageMetrics, toAiPayload, buildUsageAnalysisPrompt } from '@/lib/usageStats'
 import { fetchForemanTargets, sendReminderEmail, sendReminderPush, sendLineMessage, projectUrl, isJstSunday } from '@/lib/notify'
 
@@ -35,7 +36,8 @@ async function runUsageAnalysis() {
 async function runMorningReminder() {
   if (isJstSunday()) return 0
 
-  const targets = await fetchForemanTargets(supabase)
+  // 休工の印がある現場は知らせない（lib/siteOff.ts）
+  const targets = await fetchForemanTargets(supabase, jstToday())
 
   await Promise.all(targets.map(async t => {
     const lines = [

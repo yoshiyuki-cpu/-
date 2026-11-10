@@ -39,6 +39,7 @@ export function buildEntryReportLines(statuses: SiteStatus[], date: string, time
   const missing = statuses.filter(s => classify(s) === 'missing')
   const done = statuses.filter(s => classify(s) === 'done')
   const none = statuses.filter(s => classify(s) === 'none')
+  const off = statuses.filter(s => classify(s) === 'off')
   const detail = (s: SiteStatus) =>
     `KY${mark(s.ky)} 議事録${mark(s.minutes)}${s.toolsRequired ? ` 道具${mark(s.tools)}` : ''} 人工${s.labor > 0 ? `${s.labor}名` : '×'} 処分${s.waste > 0 ? `${s.waste}件` : 'なし'}${s.other > 0 ? ` 経費${s.other}件` : ''}${s.unlocked ? '（社長が解除）' : ''}`
 
@@ -54,7 +55,10 @@ export function buildEntryReportLines(statuses: SiteStatus[], date: string, time
     lines.push('')
   }
   if (none.length) {
-    lines.push(`■ 今日の記録なし（休工？） ${none.length}`, `　${none.map(s => s.name).join('、')}`, '')
+    lines.push(`■ 今日の記録なし（休工の印なし） ${none.length}`, `　${none.map(s => s.name).join('、')}`, '')
+  }
+  if (off.length) {
+    lines.push(`■ 休工 ${off.length}`, `　${off.map(s => s.name).join('、')}`, '')
   }
   if (late.length) {
     lines.push(`■ 後入れ（前の日の入れ忘れ） ${late.length}`)

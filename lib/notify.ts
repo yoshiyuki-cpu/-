@@ -2,6 +2,7 @@ import nodemailer from 'nodemailer'
 import webpush from 'web-push'
 import { SupabaseClient } from '@supabase/supabase-js'
 import { sendSlack } from '@/lib/slack'
+import { loadOffIds } from '@/lib/siteOff'
 
 const APP_URL = process.env.APP_URL || 'https://koji-daichou-zeta.vercel.app'
 
@@ -40,14 +41,18 @@ export type ForemanTarget = {
 }
 
 // is_foreman=trueの作業員を、担当現場（アクティブのみ）と一緒に取得する
-export async function fetchForemanTargets(supabase: SupabaseClient): Promise<ForemanTarget[]> {
+// offDate を渡すと、その日に休工の印がある現場を除く（担当の現場が全部休工の職長には送らない）
+export async function fetchForemanTargets(supabase: SupabaseClient, offDate?: string): Promise<ForemanTarget[]> {
   const { data: foremen } = await supabase.from('workers').select('id, name, email, line_user_id').eq('is_foreman', true)
   if (!foremen || foremen.length === 0) return []
 
-  const { data: links } = await supabase
-    .from('foreman_projects')
-    .select('worker_id, projects(id, name, status)')
-    .in('worker_id', foremen.map(f => f.id))
+  const [{ data: links }, offIds] = await Promise.all([
+    supabase
+      .from('foreman_projects')
+      .select('worker_id, projects(id, name, status)')
+      .in('worker_id', foremen.map(f => f.id)),
+    offDate ? loadOffIds(supabase, offDate) : Promise.resolve(new Set<number>()),
+  ])
 
   return foremen.map(f => ({
     worker_id: f.id,
@@ -55,7 +60,7 @@ export async function fetchForemanTargets(supabase: SupabaseClient): Promise<For
     email: f.email,
     line_user_id: f.line_user_id,
     projects: (links ?? [])
-      .filter((l: any) => l.worker_id === f.id && l.projects?.status === 'active')
+      .filter((l: any) => l.worker_id === f.id && l.projects?.status === 'active' && !offIds.has(l.projects.id))
       .map((l: any) => ({ id: l.projects.id, name: l.projects.name })),
   })).filter(f => f.projects.length > 0)
 }

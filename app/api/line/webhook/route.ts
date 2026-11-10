@@ -2,7 +2,7 @@ import crypto from 'crypto'
 import Anthropic from '@anthropic-ai/sdk'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { jstToday } from '@/lib/date'
+import { jstToday, jstDateOffset } from '@/lib/date'
 import { projectUrl } from '@/lib/notify'
 import { OWNER_LINE_LINK_CODE_KEY, OWNER_LINE_USER_ID_KEY } from '@/lib/entryReport'
 import { loadNameCtx, sanitizeParsed, summaryLines, hasEntries, registerParsed, cancelReport, fmtDate, NameCtx, Parsed } from '@/lib/lineReport'
@@ -12,6 +12,7 @@ import { buildEntryReportFlex } from '@/lib/entryReportFlex'
 import { handleManifestText, handleManifestPostback } from '@/lib/manifestLine'
 import { handleDemenText, handleDemenPostback } from '@/lib/demenLine'
 import { handlePhoto, handlePhotoPostback } from '@/lib/photoLine'
+import { handleOffText, handleOffPostback } from '@/lib/siteOffLine'
 
 // LINE 公式アカウントの Webhook。
 // 1) 1対1トークで連携コードが送られてきたら、その人の LINE を作業員に結び付ける（従来どおり）
@@ -296,7 +297,8 @@ export async function POST(req: NextRequest) {
       // マニフェストのグループのボタン（現場の選択・それでも入れる・入れない）
       if (event.type === 'postback') {
         const params = new URLSearchParams(event.postback?.data ?? '')
-        const messages = await handleManifestPostback(supabase, params, groupId) ?? await handleDemenPostback(supabase, params, groupId) ?? await handlePhotoPostback(supabase, params, groupId)
+        const messages = await handleOffPostback(supabase, params, event.source?.userId ?? null)
+          ?? await handleManifestPostback(supabase, params, groupId) ?? await handleDemenPostback(supabase, params, groupId) ?? await handlePhotoPostback(supabase, params, groupId)
         if (messages && event.replyToken) await replyMessages(event.replyToken, messages)
         return
       }
@@ -329,6 +331,12 @@ export async function POST(req: NextRequest) {
 
       // 1対1のトークで「今日の状況」と送られたら記入状況を返す。AI の報告読み取りより先に見る
       if (event.source?.type === 'user' && /^(今日の状況|記入状況|今日の記入状況)$/.test(text)) { await handleStatusRequest(event); return }
+
+      // 1対1のトークで「休工」が入った文（「今日は○○と○○以外は休工」など）は、現場の休工の印として読む
+      if (event.source?.type === 'user' && text.includes('休工')) {
+        const messages = await handleOffText(supabase, { text, userId: event.source.userId ?? null, today: jstToday(), tomorrow: jstDateOffset(1) })
+        if (messages) { if (event.replyToken) await replyMessages(event.replyToken, messages); return }
+      }
 
       // 連携コード（英数6文字）は先に試す。1対1のトークでしか来ない前提だが、グループでも害はない
       if (/^[A-Z0-9]{6}$/i.test(text) && await handleLinkCode(event, text.toUpperCase())) return
