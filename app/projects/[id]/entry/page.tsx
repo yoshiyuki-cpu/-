@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useRef, useSyncExternalStore } from 'react'
-import { supabase, DisposalSite, WasteType, Vehicle, FuelPrice } from '@/lib/supabase'
+import { supabase, DisposalSite, WasteType, Vehicle, FuelPrice, FuelMonthlyPrice } from '@/lib/supabase'
+import { pickFuelPrice, fuelAmount, fuelPriceNote } from '@/lib/fuelPrice'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { jstToday } from '@/lib/date'
@@ -63,6 +64,8 @@ export default function EntryPage() {
   const [workers, setWorkers] = useState<Worker[]>([])
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [fuelPrices, setFuelPrices] = useState<FuelPrice[]>([])
+  // 月ごとの燃料単価。表がまだ無い環境では空のまま（基本単価で計算する）
+  const [monthlyFuel, setMonthlyFuel] = useState<FuelMonthlyPrice[]>([])
   const [recordedVehicleIds, setRecordedVehicleIds] = useState<Set<number>>(new Set())
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
@@ -187,13 +190,14 @@ export default function EntryPage() {
   }
 
   async function loadMaster() {
-    const [{ data: s }, { data: w }, { data: wk }, { data: v }, { data: le }, { data: fp }] = await Promise.all([
+    const [{ data: s }, { data: w }, { data: wk }, { data: v }, { data: le }, { data: fp }, { data: fm }] = await Promise.all([
       supabase.from('disposal_sites').select('*').order('name'),
       supabase.from('waste_types').select('*, disposal_sites(name)').order('name'),
       supabase.from('workers').select('*').order('name'),
       supabase.from('vehicles').select('*').order('name'),
       supabase.from('other_entries').select('vehicle_id').eq('project_id', Number(id)).eq('entry_type', 'lease').not('vehicle_id', 'is', null),
       supabase.from('fuel_prices').select('*'),
+      supabase.from('fuel_monthly_prices').select('*'),
     ])
     setSites(s ?? [])
     setWasteTypes((w as any) ?? [])
@@ -201,6 +205,7 @@ export default function EntryPage() {
     setVehicles(v ?? [])
     setRecordedVehicleIds(new Set(((le ?? []) as { vehicle_id: number }[]).map(e => e.vehicle_id)))
     setFuelPrices(fp ?? [])
+    setMonthlyFuel((fm ?? []) as FuelMonthlyPrice[])
     // 確認の読み込みは入力を待たせない（失敗しても入力は普通にできる）
     loadChecklist(supabase, Number(id)).then(setCheckState).catch(() => setCheckState(null))
   }
@@ -229,6 +234,17 @@ export default function EntryPage() {
   }, [id, laborDate, wasteForm.date])
   // null = 確認中
   const gateFor = (date: string): GateState | null => gates[date] ?? null
+
+  // 燃料代：給油した日の月の単価（月ごとの単価 → 前の月 → 基本単価）× リットル数
+  const fuelHit = (date: string, kind: string) =>
+    kind === '軽油' || kind === 'レギュラー' ? pickFuelPrice(date, kind, monthlyFuel, fuelPrices) : null
+  function applyFuel(f: typeof otherForm, patch: Partial<typeof otherForm>): typeof otherForm {
+    const n = { ...f, ...patch }
+    const hit = fuelHit(n.date, n.fuel_type)
+    const literPrice = hit ? String(hit.price) : n.liter_price
+    return { ...n, liter_price: literPrice, unit_price: literPrice && n.quantity ? String(fuelAmount(Number(n.quantity), Number(literPrice))) : n.unit_price }
+  }
+  const currentFuelHit = tab === 'fuel' ? fuelHit(otherForm.date, otherForm.fuel_type) : null
 
   const isFirstVehicleUse = tab === 'lease' && !!otherForm.vehicle_id && !recordedVehicleIds.has(Number(otherForm.vehicle_id))
   const selectedVehicle = vehicles.find(v => String(v.id) === otherForm.vehicle_id)
@@ -555,7 +571,10 @@ export default function EntryPage() {
           <div>
             <label className="block text-sm font-medium mb-1">日付</label>
             <input type="date" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base" value={otherForm.date}
-              onChange={e => setOtherForm({ ...otherForm, date: e.target.value })} />
+              onChange={e => {
+                const date = e.target.value
+                setOtherForm(f => (tab === 'fuel' && f.fuel_type ? applyFuel(f, { date }) : { ...f, date }))
+              }} />
           </div>
           {tab === 'lease' && (
             <>
@@ -611,23 +630,11 @@ export default function EntryPage() {
               <div>
                 <label className="block text-sm font-medium mb-1">種類</label>
                 <div className="flex gap-2">
-                  <button type="button" onClick={() => {
-                    const literPrice = fuelPrices.find(fp => fp.fuel_type === '軽油')?.unit_price
-                    setOtherForm(f => ({
-                      ...f, fuel_type: '軽油', liter_price: literPrice ? String(literPrice) : f.liter_price,
-                      unit_price: literPrice && f.quantity ? String(Math.round(literPrice * Number(f.quantity))) : f.unit_price,
-                    }))
-                  }}
+                  <button type="button" onClick={() => setOtherForm(f => applyFuel(f, { fuel_type: '軽油' }))}
                     className={`flex-1 py-3 rounded border text-sm font-medium ${otherForm.fuel_type === '軽油' ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600'}`}>
                     軽油
                   </button>
-                  <button type="button" onClick={() => {
-                    const literPrice = fuelPrices.find(fp => fp.fuel_type === 'レギュラー')?.unit_price
-                    setOtherForm(f => ({
-                      ...f, fuel_type: 'レギュラー', liter_price: literPrice ? String(literPrice) : f.liter_price,
-                      unit_price: literPrice && f.quantity ? String(Math.round(literPrice * Number(f.quantity))) : f.unit_price,
-                    }))
-                  }}
+                  <button type="button" onClick={() => setOtherForm(f => applyFuel(f, { fuel_type: 'レギュラー' }))}
                     className={`flex-1 py-3 rounded border text-sm font-medium ${otherForm.fuel_type === 'レギュラー' ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600'}`}>
                     レギュラー
                   </button>
@@ -654,7 +661,10 @@ export default function EntryPage() {
                       unit_price: literPrice && f.quantity ? String(Math.round(Number(literPrice) * Number(f.quantity))) : f.unit_price,
                     }))
                   }} placeholder="種類を選ぶと自動入力されます" />
-                <p className="text-xs text-gray-400 mt-1">種類を選ぶと基本単価（マスタ管理で変更可）が自動入力されます。当日の単価が違う場合はここで上書きしてください</p>
+                <p className="text-xs text-gray-400 mt-1">種類を選ぶと、給油した日の月の単価（マスタの「燃料単価」で月ごとに設定）が自動入力されます。違う場合はここで上書きしてください</p>
+                {currentFuelHit && (
+                  <p className={`text-xs mt-1 ${currentFuelHit.from === 'month' ? 'text-gray-500' : 'text-amber-700'}`}>{fuelPriceNote(currentFuelHit)}</p>
+                )}
                 {otherForm.liter_price && otherForm.quantity && (
                   <p className="text-sm text-gray-500 mt-1">
                     金額: <span className="font-medium text-gray-800">{Math.round(Number(otherForm.liter_price) * Number(otherForm.quantity)).toLocaleString()}円</span>
@@ -683,7 +693,12 @@ export default function EntryPage() {
                         })
                         if (!res.ok) throw new Error('request failed')
                         const data = await res.json()
-                        if (data.amount) {
+                        const liters = Number(data.liters) > 0 ? String(data.liters) : ''
+                        const kind = data.fuel_type === '軽油' || data.fuel_type === 'レギュラー' ? data.fuel_type : ''
+                        if (liters && (kind || otherForm.fuel_type)) {
+                          // ガソリンカードはレシートに金額が出ないので、リットル数 × その月の単価で計算する
+                          setOtherForm(f => applyFuel(f, { quantity: liters, fuel_type: kind || f.fuel_type }))
+                        } else if (data.amount) {
                           setOtherForm(f => ({
                             ...f,
                             unit_price: String(data.amount),
@@ -691,7 +706,7 @@ export default function EntryPage() {
                             fuel_type: data.fuel_type === '軽油' || data.fuel_type === 'レギュラー' ? data.fuel_type : f.fuel_type,
                           }))
                         } else {
-                          setReceiptError('金額を読み取れませんでした。金額を直接入力してください。')
+                          setReceiptError(liters ? '油種を読み取れませんでした。種類（軽油／レギュラー）を選んでください。' : '給油量（リットル）を読み取れませんでした。数量を直接入力してください。')
                         }
                       } catch {
                         setReceiptError('読み取りに失敗しました。金額を直接入力してください。')

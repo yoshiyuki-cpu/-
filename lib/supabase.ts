@@ -91,6 +91,15 @@ export type FuelPrice = {
   updated_at: string
 }
 
+// 月ごとの燃料単価（supabase-schema-fuel-monthly-prices.sql）。month は 'YYYY-MM'
+export type FuelMonthlyPrice = {
+  id: number
+  month: string
+  fuel_type: '軽油' | 'レギュラー'
+  unit_price: number
+  updated_at: string
+}
+
 export type Tool = {
   id: number
   name: string
