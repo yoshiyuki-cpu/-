@@ -58,7 +58,7 @@ export function buildEntryReportLines(statuses: SiteStatus[], date: string, time
     lines.push(`■ 今日の記録なし（休工の印なし） ${none.length}`, `　${none.map(s => s.name).join('、')}`, '')
   }
   if (off.length) {
-    lines.push(`■ 休工 ${off.length}`, `　${off.map(s => s.name).join('、')}`, '')
+    lines.push(`■ 休工 ${off.length}`, `　${off.map(s => `${s.name}${s.waste > 0 ? `（処分${s.waste}件）` : ''}`).join('、')}`, '')
   }
   if (late.length) {
     lines.push(`■ 後入れ（前の日の入れ忘れ） ${late.length}`)

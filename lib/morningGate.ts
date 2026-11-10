@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { jstToday } from '@/lib/date'
+import { offKey } from '@/lib/siteOff'
 
 // 朝の KY活動・議事録・道具の確認が済むまで、その現場のその日の人工・処分代（廃材）を入力させない仕組み。
 // 入力画面・LINE報告の Webhook・LINE報告の画面の3か所から同じ判定を使う。
@@ -25,18 +26,20 @@ export type GateState = {
   exempt: boolean   // 始める前の日付
   late: boolean     // 前の日の分（入れ忘れの後入れ）
   unknown: boolean  // 確認できなかった
+  dayOff: boolean   // 休工の印がある日（lib/siteOff.ts）。処分代だけは KY なしで入れられる
 }
 
 export async function loadGate(supabase: SupabaseClient, projectId: number, date: string): Promise<GateState> {
-  const base: GateState = { date, ky: false, minutes: false, tools: false, toolsRequired: false, unlockedBy: null, exempt: false, late: false, unknown: false }
+  const base: GateState = { date, ky: false, minutes: false, tools: false, toolsRequired: false, unlockedBy: null, exempt: false, late: false, unknown: false, dayOff: false }
   if (!date || date < GATE_START) return { ...base, exempt: true }
   if (date < jstToday()) return { ...base, late: true }
   try {
-    const [ky, mn, un, tc] = await Promise.all([
+    const [ky, mn, un, tc, off] = await Promise.all([
       supabase.from('ky_photos').select('id').eq('project_id', projectId).eq('date', date).limit(1),
       supabase.from('meeting_notes').select('id').eq('project_id', projectId).eq('date', date).limit(1),
       supabase.from('app_settings').select('value').eq('key', gateUnlockKey(projectId, date)).limit(1),
       supabase.from('tool_checks').select('id').eq('project_id', projectId).eq('date', date).limit(1),
+      supabase.from('app_settings').select('key').eq('key', offKey(projectId, date)).limit(1),
     ])
     if (ky.error || mn.error) return { ...base, unknown: true }
     // 道具の確認の表が無い（SQL 未実行）ときは、道具の確認を求めない
@@ -48,6 +51,7 @@ export async function loadGate(supabase: SupabaseClient, projectId: number, date
       tools: (tc.data ?? []).length > 0,
       toolsRequired,
       unlockedBy: (un.data?.[0] as { value?: string } | undefined)?.value ?? null,
+      dayOff: (off.data ?? []).length > 0,
     }
   } catch {
     return { ...base, unknown: true }
@@ -56,6 +60,12 @@ export async function loadGate(supabase: SupabaseClient, projectId: number, date
 
 export function gateOpen(g: GateState) {
   return g.exempt || g.late || g.unknown || !!g.unlockedBy || (g.ky && g.minutes && (g.tools || !g.toolsRequired))
+}
+
+// 処分代（廃材）を入れてよいか。休工の日も、前の日の宵積みを処分場へ出すことがあるので止めない（2026-11 社長）。
+// 人工は休工の日でもふだんどおり gateOpen で見る
+export function wasteGateOpen(g: GateState) {
+  return gateOpen(g) || g.dayOff
 }
 
 // 足りないものを「KY活動・議事録」のように並べる

@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { jstToday } from '@/lib/date'
 import { loadChecklist, undoneItems, ChecklistState } from '@/lib/checklist'
 import { isOffline, isNetworkError, enqueue } from '@/lib/offlineQueue'
-import { loadGate, gateOpen, GateState, isLateDate, LATE_PREFIX } from '@/lib/morningGate'
+import { loadGate, gateOpen, wasteGateOpen, GateState, isLateDate, LATE_PREFIX } from '@/lib/morningGate'
 import { logAction } from '@/lib/audit'
 import MorningGateBlock from '../MorningGateBlock'
 
@@ -280,7 +280,7 @@ export default function EntryPage() {
     if (!wasteForm.waste_type_id || !wasteForm.quantity) return
     // 念のため保存の直前にも確かめる（別の端末で KY写真を消した、など）
     const wg = await loadGate(supabase, Number(id), wasteForm.date)
-    if (!gateOpen(wg)) { setGates(prev => ({ ...prev, [wasteForm.date]: wg })); return }
+    if (!wasteGateOpen(wg)) { setGates(prev => ({ ...prev, [wasteForm.date]: wg })); return }
     setSaving(true)
     const result = await insertOrQueue('waste_entries', [{
       project_id: Number(id),
@@ -416,7 +416,7 @@ export default function EntryPage() {
         const date = tab === 'waste' ? wasteForm.date : laborDate
         const g = gateFor(date)
         if (!g) return <p className="text-center py-10 text-gray-500">朝の KY活動・議事録を確認中...</p>
-        if (gateOpen(g)) return null
+        if (tab === 'waste' ? wasteGateOpen(g) : gateOpen(g)) return null
         return (
           <MorningGateBlock projectId={Number(id)} projectName={projectName} gate={g} date={date}
             onDateChange={d => tab === 'waste' ? setWasteForm({ ...wasteForm, date: d }) : setLaborDate(d)}
@@ -424,7 +424,10 @@ export default function EntryPage() {
         )
       })()}
 
-      {tab === 'waste' && gateFor(wasteForm.date) && gateOpen(gateFor(wasteForm.date)!) && (
+      {tab === 'waste' && gateFor(wasteForm.date)?.dayOff && !gateOpen(gateFor(wasteForm.date)!) && (
+        <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2">この日は休工です。前の日の宵積みなどの処分代は、KY活動・議事録なしで入れられます。</p>
+      )}
+      {tab === 'waste' && gateFor(wasteForm.date) && wasteGateOpen(gateFor(wasteForm.date)!) && (
         <form onSubmit={saveWaste} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex flex-col gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">日付</label>
