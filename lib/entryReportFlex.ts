@@ -3,6 +3,7 @@ import { classify, SiteStatus } from '@/lib/siteStatus'
 
 // 19:30の「現場の記入状況」を LINE の Flex Message にする。中身はメール版（buildEntryReportLines）と同じ。
 // 記録なし・抜けがある現場には「記入する」ボタンを付け、押すとその現場の今日の記入画面が開く。
+// 記録なしの現場には「休工」ボタンも付け、押すとその日の休工の印が付く（lib/siteOff.ts）。
 // 1通にまとめて送る（現場ごとに送ると通数を使い、通知も多すぎるため）。
 
 const APP_URL = process.env.APP_URL || 'https://koji-daichou-zeta.vercel.app'
@@ -24,13 +25,16 @@ function section(title: string, color: string, rows: FlexComponent[]): FlexCompo
   return { type: 'box', layout: 'vertical', spacing: 'sm', contents: [text(title, { weight: 'bold', color }), ...rows] }
 }
 
-// withDetail：内訳を出すか / withButton：「記入する」ボタンを付けるか
-function siteRows(list: SiteStatus[], withDetail: boolean, withButton: boolean): FlexComponent[] {
+// withDetail：内訳を出すか / withButton：「記入する」ボタンを付けるか / offDate：「休工」ボタンを付ける日（記録なしの現場だけ）
+function siteRows(list: SiteStatus[], withDetail: boolean, withButton: boolean, offDate?: string): FlexComponent[] {
   const shown = list.slice(0, MAX_ROWS)
   const rows: FlexComponent[] = shown.map(s => {
     const name = text(s.name, { weight: 'bold', flex: 1, gravity: 'center' })
+    const offButton: FlexComponent[] = offDate
+      ? [{ type: 'button', style: 'secondary', height: 'sm', flex: 0, action: { type: 'postback', label: '休工', data: `action=site_off&project_id=${s.id}&date=${offDate}&off=1`, displayText: `${s.name}は休工` } }]
+      : []
     const head: FlexComponent = withButton
-      ? { type: 'box', layout: 'horizontal', spacing: 'sm', contents: [name, { type: 'button', style: 'secondary', height: 'sm', flex: 0, action: { type: 'uri', label: '記入する', uri: projectUrl('today', s.id) } }] }
+      ? { type: 'box', layout: 'horizontal', spacing: 'sm', contents: [name, ...offButton, { type: 'button', style: 'secondary', height: 'sm', flex: 0, action: { type: 'uri', label: '記入する', uri: projectUrl('today', s.id) } }] }
       : name
     return { type: 'box', layout: 'vertical', contents: [head, ...(withDetail ? [text(detail(s), { size: 'xs', color: '#6b7280' })] : [])] }
   })
@@ -46,12 +50,14 @@ export function buildEntryReportFlex(statuses: SiteStatus[], date: string, timeL
   const missing = statuses.filter(s => classify(s) === 'missing')
   const done = statuses.filter(s => classify(s) === 'done')
   const none = statuses.filter(s => classify(s) === 'none')
+  const off = statuses.filter(s => classify(s) === 'off')
 
   const build = (withDoneDetail: boolean) => {
     const body: FlexComponent[] = []
     if (missing.length) body.push(section(`■ 抜けがある現場 ${missing.length}`, '#b91c1c', siteRows(missing, true, true)))
-    if (none.length) body.push(section(`■ 今日の記録なし（休工？） ${none.length}`, '#b45309', siteRows(none, false, true)))
+    if (none.length) body.push(section(`■ 今日の記録なし（休工の印なし） ${none.length}`, '#b45309', siteRows(none, false, true, date)))
     if (done.length) body.push(section(`■ 記入済み ${done.length}`, '#047857', siteRows(done, withDoneDetail, false)))
+    if (off.length) body.push(section(`■ 休工 ${off.length}`, '#6b7280', [text(off.map(s => s.name).join('、'), { size: 'xs', color: '#6b7280' })]))
     if (late.length) body.push(section(`■ 後入れ（前の日の入れ忘れ） ${late.length}`, '#4b5563', late.slice(0, MAX_ROWS).map(l => text(l, { size: 'xs', color: '#374151' }))))
     if (!statuses.length) body.push(text('進行中の現場がありません。'))
     body.push(text(`${timeLabel}時点の集計です。それより後の記入は入っていません。`, { size: 'xxs', color: '#9ca3af' }))
@@ -71,6 +77,6 @@ export function buildEntryReportFlex(statuses: SiteStatus[], date: string, timeL
   // 大きすぎるときは、記入済みの内訳を省いて1通に収める
   let contents: FlexComponent = build(true)
   if (JSON.stringify(contents).length > SIZE_LIMIT) contents = build(false)
-  const altText = `📋 ${m}/${d}(${wd}) 現場の記入状況（${timeLabel}時点）抜け${missing.length}・記録なし${none.length}・記入済み${done.length}`
+  const altText = `📋 ${m}/${d}(${wd}) 現場の記入状況（${timeLabel}時点）抜け${missing.length}・記録なし${none.length}・記入済み${done.length}${off.length ? `・休工${off.length}` : ''}`
   return { type: 'flex', altText: altText.slice(0, 400), contents }
 }
